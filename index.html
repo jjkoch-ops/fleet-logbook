@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#e5a00d">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=3">
-<script src="config.js?v=3"></script>
+<link rel="stylesheet" href="style.css?v=5">
+<script src="config.js?v=5"></script>
 </head>
 <body>
 <header>
@@ -22,26 +22,38 @@
 
   <div id="done" class="done" hidden>
     <span id="doneText"></span>
-    <button type="button" class="btn small" id="another">Log another machine</button>
+    <button type="button" class="btn small" id="another">Log another entry</button>
   </div>
 
   <form id="f" class="form" novalidate>
-    <p class="lead" style="margin:0">Fill this in at the end of each shift, one entry per machine.</p>
+    <p class="lead" style="margin:0" id="leadTxt">Fill this in at the end of each shift, one entry per machine. Trucks: one entry after each trip.</p>
     <div class="row2">
       <div class="field"><label for="date">Date</label><input id="date" type="date" required></div>
       <div class="field"><label for="machine">Machine</label><select id="machine" required></select></div>
     </div>
     <div class="row2">
       <div class="field"><label for="operator">Your name</label><select id="operator" required></select></div>
-      <div class="field"><label for="site">Site / client</label><select id="site"></select></div>
+      <div class="field" id="siteWrap"><label for="site">Site / client</label><select id="site"></select></div>
+    </div>
+    <div id="tripWrap" class="form" hidden>
+      <div class="row2">
+        <div class="field"><label for="tripFrom">Trip from</label><select id="tripFrom"></select></div>
+        <div class="field"><label for="tripTo">Trip to</label><select id="tripTo"></select></div>
+      </div>
+      <div class="field"><label for="material">Material / load</label><input id="material" list="materials" placeholder="e.g. G5, sand, rubble" autocomplete="off"><datalist id="materials"></datalist></div>
     </div>
     <div class="field">
       <label for="reading" id="readingLbl">Hour meter</label>
       <div class="meter-wrap"><input id="reading" class="meter" type="number" inputmode="decimal" step="0.1" min="0" required><span class="unit" id="unit">h</span></div>
       <div class="hint" id="readingHint"></div>
     </div>
+    <div class="field" id="kmWrap" hidden>
+      <label for="km">Odometer</label>
+      <div class="meter-wrap"><input id="km" class="meter" type="number" inputmode="numeric" step="1" min="0"><span class="unit">km</span></div>
+      <div class="hint" id="kmHint"></div>
+    </div>
     <div class="field">
-      <span class="lbl" id="fuelLbl">Fuel level at end of shift</span>
+      <span class="lbl" id="fuelLbl">Fuel level now</span>
       <div class="gauge" role="group" aria-labelledby="fuelLbl" id="fuel">
         <button type="button" data-v="0" aria-pressed="false">E</button><button type="button" data-v="25" aria-pressed="false">¼</button><button type="button" data-v="50" aria-pressed="false">½</button><button type="button" data-v="75" aria-pressed="false">¾</button><button type="button" data-v="100" aria-pressed="false">F</button>
       </div>
@@ -54,7 +66,7 @@
       </div>
     </div>
     <div class="field" id="defectWrap" hidden><label for="defectNote">Describe the problem</label><textarea id="defectNote" placeholder="e.g. Hydraulic hose leaking at front bucket ram"></textarea></div>
-    <div class="field"><label for="photo">Photo of hour meter (optional)</label><input id="photo" type="file" accept="image/*" capture="environment"></div>
+    <div class="field"><label for="photo">Photo of the dashboard / meter (optional)</label><input id="photo" type="file" accept="image/*" capture="environment"></div>
     <div class="field"><label for="pin">Site PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="4-digit PIN"><div class="hint">Your phone remembers the PIN after the first time.</div></div>
     <label class="check" id="confirmWrap" hidden><input type="checkbox" id="confirm"><span id="confirmText"></span></label>
     <div id="err" class="err" hidden></div>
@@ -88,12 +100,35 @@ function render(){
   fill("#machine", cfg.machines.map(m => [m.id, m.name]), "Choose machine");
   fill("#operator", cfg.operators.map(o => [o,o]), "Choose your name");
   fill("#site", cfg.sites.map(o => [o,o]), cfg.sites.length ? "Choose site" : "—");
+  fill("#tripFrom", cfg.sites.map(o => [o,o]), "Choose start");
+  fill("#tripTo", cfg.sites.map(o => [o,o]), "Choose destination");
+  $("#materials").innerHTML = (cfg.materials || []).map(x => `<option value="${String(x).replace(/"/g,"&quot;")}">`).join("");
   const lastOp = store.get("fl_operator", ""); if(lastOp && !$("#operator").value && cfg.operators.includes(lastOp)) $("#operator").value = lastOp;
   hint();
 }
 const machine = () => cfg && cfg.machines.find(m => m.id === $("#machine").value);
 
+function modeFields(){
+  const m = machine();
+  $("#kmWrap").hidden = !(m && m.km);
+  $("#tripWrap").hidden = !(m && m.trips);
+  $("#siteWrap").hidden = !!(m && m.trips);
+  $("#submit").textContent = m && m.trips ? "Submit trip" : "Submit log";
+  const kh = $("#kmHint");
+  if(m && m.km) kh.textContent = m.lastKm != null ? `Last odometer ${m.lastKm} km.` : "First odometer reading for this machine.";
+}
+function kmCheck(){
+  const m = machine(); if(!m || !m.km) return {ok:true};
+  const v = parseFloat($("#km").value), kh = $("#kmHint"); kh.className = "hint";
+  if(isNaN(v)) return {ok:false, msg:"Enter the odometer (km)."};
+  if(m.lastKm != null && v < m.lastKm){ kh.className = "hint bad"; kh.textContent = `Lower than the last odometer (${m.lastKm} km). Check it.`; return {ok:false, msg:`The odometer is lower than the last one (${m.lastKm} km).`}; }
+  if(m.lastKm != null){ kh.textContent = `${Math.round(v - m.lastKm)} km since the last entry (last ${m.lastKm} km).`; if(v - m.lastKm > 1500){ kh.className = "hint warn"; } }
+  return {ok:true};
+}
+$("#km").addEventListener("input", kmCheck);
+
 function hint(){
+  modeFields();
   const m = machine(), h = $("#readingHint");
   $("#unit").textContent = m && m.meter === "km" ? "km" : "h";
   $("#readingLbl").textContent = m && m.meter === "km" ? "Odometer" : "Hour meter";
@@ -189,6 +224,9 @@ $("#f").addEventListener("submit", async e => {
   if(isNaN(parseFloat($("#reading").value))) return fail("Enter the meter reading.");
   if(fuelPct == null) return fail("Tap the fuel level.");
   if(defect && !$("#defectNote").value.trim()) return fail("Describe the defect.");
+  if(m.trips && !$("#tripFrom").value) return fail("Choose where the trip started.");
+  if(m.trips && !$("#tripTo").value) return fail("Choose where the trip ended.");
+  const kc = kmCheck(); if(!kc.ok) return fail(kc.msg);
   if(!$("#pin").value.trim()) return fail("Enter the site PIN.");
   const chk = hint(); if(!chk.ok) return fail(chk.msg);
 
@@ -198,30 +236,35 @@ $("#f").addEventListener("submit", async e => {
     operator: $("#operator").value, site: $("#site").value, date: $("#date").value,
     reading: parseFloat($("#reading").value), fuel_pct: fuelPct, fuel_added: parseFloat($("#fuelAdded").value) || 0,
     defect, defect_note: defect ? $("#defectNote").value.trim() : "",
+    odometer_km: m.km ? parseFloat($("#km").value) : null,
+    trip_from: m.trips ? $("#tripFrom").value : "", trip_to: m.trips ? $("#tripTo").value : "", material: m.trips ? $("#material").value.trim() : "",
     photo: await resizePhoto($("#photo").files[0]), client_id: Date.now().toString(36) + Math.random().toString(36).slice(2,6)
   };
   store.set("fl_operator", body.operator);
   const u = m.meter === "km" ? "km" : "h";
   try{
     const res = await post(body);
-    if(!res.ok){ btn.disabled = false; btn.textContent = "Submit log"; return fail(res.error || "The log was not saved."); }
+    if(!res.ok){ btn.disabled = false; btn.textContent = m.trips ? "Submit trip" : "Submit log"; return fail(res.error || "The log was not saved."); }
     store.set("fl_pin", body.pin);
-    m.last = { reading: body.reading, date: body.date, operator: body.operator }; store.set("fl_config", cfg);
-    $("#doneText").innerHTML = `<b>Logged.</b> ${m.name} at ${body.reading} ${u}.`;
+    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; store.set("fl_config", cfg);
+    $("#doneText").innerHTML = m.trips ? `<b>Trip logged.</b> ${m.name}: ${body.trip_from} → ${body.trip_to}.` : `<b>Logged.</b> ${m.name} at ${body.reading} ${u}.`;
   }catch(x){
     // No signal: keep it on the phone and send later (photo dropped to save space)
     const q = store.get("fl_outbox", []); q.push({...body, photo:null}); store.set("fl_outbox", q);
     store.set("fl_pin", body.pin);
-    m.last = { reading: body.reading, date: body.date, operator: body.operator }; store.set("fl_config", cfg);
+    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; store.set("fl_config", cfg);
     $("#doneText").innerHTML = `<b>Saved on this phone.</b> No signal right now. It will send automatically.`;
     showOutbox();
   }
-  btn.disabled = false; btn.textContent = "Submit log";
+  btn.disabled = false; btn.textContent = m.trips ? "Submit trip" : "Submit log";
   $("#f").hidden = true; $("#done").hidden = false; window.scrollTo(0,0);
 });
 
 $("#another").addEventListener("click", () => {
-  $("#machine").value = ""; $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
+  const keep = machine() && machine().trips;
+  if(!keep) $("#machine").value = "";
+  $("#km").value = ""; $("#material").value = "";
+  if(keep){ $("#tripFrom").value = $("#tripTo").value; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
   fuelPct = null; defect = false; $$("#fuel button").forEach(b => b.setAttribute("aria-pressed","false"));
   $$("#defect button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === "no")); $("#defectWrap").hidden = true;
   $("#done").hidden = true; $("#f").hidden = false; hint();

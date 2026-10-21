@@ -111,3 +111,18 @@ If `Code.gs` changes: paste the new version into Apps Script, then **Deploy → 
 - The driver link is public, so the PIN stops strangers submitting logs.
 - The dashboard key protects your data. Don't share the dashboard key in WhatsApp.
 - All data stays in your Google Sheet.
+
+## Trucks: hours + km, logged per trip (Tata 2628)
+
+Machines tab columns:
+
+| Column | Meaning |
+|---|---|
+| `meter` | `h` for every machine. Services count on hours. |
+| `km` | `yes` = the form also asks for the odometer (km) |
+| `km_baseline` | optional current odometer before the first log |
+| `trips` | `yes` = the driver submits after **each trip** with From, To and Material |
+
+Lists tab column C (**Materials**) fills the Material suggestions on the form.
+
+After pasting a new version of `Code.gs`, run **upgrade** once. It adds the new columns and sets the Tata to `meter=h`, `km=yes`, `trips=yes`. Then set the Tata's service interval in **hours** on the Intervals tab.

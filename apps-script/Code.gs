@@ -18,10 +18,10 @@
  */
 
 const HEADERS = {
-  Machines:  ['id', 'name', 'type', 'meter', 'baseline'],
+  Machines:  ['id', 'name', 'type', 'meter', 'baseline', 'km', 'km_baseline', 'trips'],
   Intervals: ['machine_id', 'service', 'every', 'last_done_at', 'last_done_date'],
-  Lists:     ['Operators', 'Sites'],
-  Logs:      ['timestamp', 'date', 'machine_id', 'machine', 'operator', 'site', 'reading', 'fuel_pct', 'fuel_added_l', 'defect', 'defect_note', 'photo'],
+  Lists:     ['Operators', 'Sites', 'Materials'],
+  Logs:      ['timestamp', 'date', 'machine_id', 'machine', 'operator', 'site', 'reading', 'fuel_pct', 'fuel_added_l', 'defect', 'defect_note', 'photo', 'odometer_km', 'trip_from', 'trip_to', 'material'],
   Services:  ['timestamp', 'date', 'machine_id', 'machine', 'reading', 'services', 'parts', 'notes'],
   Parts:     ['id', 'name', 'part_no', 'used_on', 'qty', 'reorder_at', 'unit']
 };
@@ -41,6 +41,13 @@ function setup() {
       sh.appendRow(HEADERS[name]);
       sh.getRange(1, 1, 1, HEADERS[name].length).setFontWeight('bold');
       sh.setFrozenRows(1);
+    } else {
+      // Add any new columns (from later versions) to the end of row 1
+      const have = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0].map(h => String(h).trim());
+      HEADERS[name].filter(h => have.indexOf(h) === -1).forEach(h => {
+        const col = sh.getLastColumn() + 1;
+        sh.getRange(1, col).setValue(h).setFontWeight('bold');
+      });
     }
   });
   // Keep date columns as plain text so they don't shift with time zones
@@ -50,10 +57,10 @@ function setup() {
 
   const machines = ss.getSheetByName('Machines');
   if (machines.getLastRow() === 1) {
-    machines.getRange(2, 1, 3, 5).setValues([
-      ['cat-426f',    'CAT 426F',    'TLB',        'h',  ''],
-      ['bobcat-s530', 'Bobcat S530', 'Skid steer', 'h',  ''],
-      ['tata-2628',   'Tata 2628',   'Truck',      'km', '']
+    machines.getRange(2, 1, 3, 8).setValues([
+      ['cat-426f',    'CAT 426F',    'TLB',        'h', '', '',    '', ''],
+      ['bobcat-s530', 'Bobcat S530', 'Skid steer', 'h', '', '',    '', ''],
+      ['tata-2628',   'Tata 2628',   'Truck',      'h', '', 'yes', '', 'yes']
     ]);
   }
   const intervals = ss.getSheetByName('Intervals');
@@ -64,7 +71,7 @@ function setup() {
       ['cat-426f',    '500 h service', 500,   '', ''],
       ['bobcat-s530', '250 h service', 250,   '', ''],
       ['bobcat-s530', '500 h service', 500,   '', ''],
-      ['tata-2628',   'Service',       10000, '', '']
+      ['tata-2628',   'Service',       250,   '', '']
     ]);
   }
 
@@ -73,6 +80,29 @@ function setup() {
   if (!props.getProperty('ADMIN_KEY')) props.setProperty('ADMIN_KEY', Utilities.getUuid().replace(/-/g, ''));
   Logger.log('Driver PIN: ' + props.getProperty('PIN'));
   Logger.log('Dashboard ADMIN_KEY: ' + props.getProperty('ADMIN_KEY'));
+}
+
+/**
+ * Run once after pasting a new version of this script. Adds new columns and
+ * switches the Tata 2628 to hours (for services) + km + per-trip logging.
+ */
+function upgrade() {
+  setup();
+  const sh = sheet('Machines');
+  const v = sh.getDataRange().getValues(), head = v[0].map(h => String(h).trim());
+  const c = n => head.indexOf(n) + 1;
+  for (let r = 1; r < v.length; r++) {
+    if (v[r][0] === 'tata-2628') {
+      sh.getRange(r + 1, c('meter')).setValue('h');
+      sh.getRange(r + 1, c('km')).setValue('yes');
+      sh.getRange(r + 1, c('trips')).setValue('yes');
+    }
+  }
+  const iv = sheet('Intervals'), w = iv.getDataRange().getValues();
+  for (let r = 1; r < w.length; r++) {
+    if (w[r][0] === 'tata-2628' && Number(w[r][2]) === 10000 && w[r][3] === '') iv.getRange(r + 1, 3).setValue(250);
+  }
+  Logger.log('Upgrade done. Check the Tata service interval (hours) on the Intervals tab.');
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,26 +152,31 @@ function publicConfig() {
     ok: true,
     machines: machines.map(m => {
       const last = lastLog(logs, m.id);
+      const lastKm = isYes(m.km) ? lastKmLog(logs, m.id) : null;
       return {
         id: m.id, name: m.name, type: m.type, meter: m.meter === 'km' ? 'km' : 'h',
+        km: isYes(m.km), trips: isYes(m.trips),
         last: last ? { reading: num(last.reading), date: last.date, operator: last.operator }
-                   : (m.baseline !== '' ? { reading: num(m.baseline), date: null, operator: null } : null)
+                   : (num(m.baseline) != null ? { reading: num(m.baseline), date: null, operator: null } : null),
+        lastKm: lastKm != null ? lastKm : num(m.km_baseline)
       };
     }),
     operators: lists.operators,
-    sites: lists.sites
+    sites: lists.sites,
+    materials: lists.materials
   };
 }
 
 function allData() {
   return {
     ok: true,
-    machines: rows('Machines').filter(m => m.id).map(m => ({ ...m, meter: m.meter === 'km' ? 'km' : 'h', baseline: m.baseline === '' ? null : num(m.baseline) })),
+    machines: rows('Machines').filter(m => m.id).map(m => ({ ...m, meter: m.meter === 'km' ? 'km' : 'h', baseline: num(m.baseline),
+      km: isYes(m.km), trips: isYes(m.trips), km_baseline: num(m.km_baseline) })),
     intervals: rows('Intervals').filter(i => i.machine_id).map(i => ({
       ...i, every: num(i.every), last_done_at: i.last_done_at === '' ? null : num(i.last_done_at)
     })),
     logs: rows('Logs').filter(l => l.machine_id).map(l => ({
-      ...l, reading: num(l.reading), fuel_pct: num(l.fuel_pct), fuel_added_l: num(l.fuel_added_l) || 0,
+      ...l, reading: num(l.reading), fuel_pct: num(l.fuel_pct), fuel_added_l: num(l.fuel_added_l) || 0, odometer_km: num(l.odometer_km),
       defect: String(l.defect).toLowerCase() === 'yes'
     })),
     services: rows('Services').filter(s => s.machine_id).map(s => ({ ...s, reading: num(s.reading) })),
@@ -165,14 +200,27 @@ function saveLog(b) {
   const fuel = Number(b.fuel_pct);
   if ([0, 25, 50, 75, 100].indexOf(fuel) === -1) throw new Error('Choose the fuel level.');
 
-  const last = lastLog(rows('Logs'), machine.id);
+  const logs = rows('Logs');
+  const last = lastLog(logs, machine.id);
   if (last && reading < num(last.reading)) {
-    throw new Error('Reading is lower than the last one logged (' + last.reading + '). Check the meter.');
+    throw new Error('Hour meter is lower than the last one logged (' + last.reading + '). Check the meter.');
+  }
+  let km = null;
+  if (isYes(machine.km)) {
+    km = Number(b.odometer_km);
+    if (b.odometer_km === '' || b.odometer_km == null || !isFinite(km) || km < 0) throw new Error('Enter the odometer (km).');
+    const lastKm = lastKmLog(logs, machine.id);
+    if (lastKm != null && km < lastKm) throw new Error('Odometer is lower than the last one logged (' + lastKm + ' km). Check it.');
+  }
+  if (isYes(machine.trips)) {
+    if (!String(b.trip_from || '').trim()) throw new Error('Choose where the trip started (From).');
+    if (!String(b.trip_to || '').trim()) throw new Error('Choose where the trip ended (To).');
   }
 
-  // Duplicate guard: same machine, date and reading already logged (e.g. a resend)
+  // Duplicate guard: same machine, date and readings already logged (e.g. a resend)
   if (b.client_id) {
-    const dup = rows('Logs').some(l => l.machine_id === machine.id && l.date === b.date && num(l.reading) === reading);
+    const dup = logs.some(l => l.machine_id === machine.id && l.date === b.date && num(l.reading) === reading &&
+      (km == null || num(l.odometer_km) === km));
     if (dup) return { ok: true, duplicate: true };
   }
 
@@ -181,10 +229,13 @@ function saveLog(b) {
     try { photoUrl = savePhoto(b.photo, machine.name + ' ' + b.date + ' ' + reading); } catch (err) { photoUrl = ''; }
   }
 
-  sheet('Logs').appendRow([
-    new Date(), String(b.date), machine.id, machine.name, b.operator, String(b.site || ''),
-    reading, fuel, Number(b.fuel_added) || 0, b.defect ? 'Yes' : 'No', String(b.defect_note || '').slice(0, 1000), photoUrl
-  ]);
+  appendByHeader('Logs', {
+    timestamp: new Date(), date: String(b.date), machine_id: machine.id, machine: machine.name, operator: b.operator,
+    site: String(b.site || ''), reading: reading, fuel_pct: fuel, fuel_added_l: Number(b.fuel_added) || 0,
+    defect: b.defect ? 'Yes' : 'No', defect_note: String(b.defect_note || '').slice(0, 1000), photo: photoUrl,
+    odometer_km: km == null ? '' : km, trip_from: String(b.trip_from || '').slice(0, 120),
+    trip_to: String(b.trip_to || '').slice(0, 120), material: String(b.material || '').slice(0, 120)
+  });
   return { ok: true };
 }
 
@@ -220,8 +271,8 @@ function saveService(b) {
     }
   });
 
-  sheet('Services').appendRow([new Date(), String(b.date), machine.id, machine.name, reading,
-    done.join(', '), partNames.join(', '), String(b.notes || '').slice(0, 2000)]);
+  appendByHeader('Services', { timestamp: new Date(), date: String(b.date), machine_id: machine.id, machine: machine.name,
+    reading: reading, services: done.join(', '), parts: partNames.join(', '), notes: String(b.notes || '').slice(0, 2000) });
   return { ok: true };
 }
 
@@ -277,7 +328,7 @@ function rows(name) {
 function listColumns() {
   const values = sheet('Lists').getDataRange().getValues().slice(1);
   const col = i => values.map(r => String(r[i] || '').trim()).filter(Boolean);
-  return { operators: col(0), sites: col(1) };
+  return { operators: col(0), sites: col(1), materials: col(2) };
 }
 
 function lastLog(logs, id) {
@@ -292,6 +343,21 @@ function savePhoto(dataUrl, name) {
   const it = DriveApp.getFoldersByName(PHOTO_FOLDER);
   const folder = it.hasNext() ? it.next() : DriveApp.createFolder(PHOTO_FOLDER);
   return folder.createFile(blob).getUrl();
+}
+
+function isYes(v) { return ['yes', 'y', 'true', '1'].indexOf(String(v).trim().toLowerCase()) !== -1; }
+
+function lastKmLog(logs, id) {
+  let best = null;
+  logs.forEach(l => { const k = num(l.odometer_km); if (l.machine_id === id && k != null && (best == null || k > best)) best = k; });
+  return best;
+}
+
+function appendByHeader(name, obj) {
+  const sh = sheet(name);
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  HEADERS[name].forEach(h => { if (head.indexOf(h) === -1) throw new Error('Column "' + h + '" is missing on the ' + name + ' tab. Run upgrade() in Apps Script.'); });
+  sh.appendRow(head.map(h => (h in obj ? obj[h] : '')));
 }
 
 function num(v) { if (v === '' || v == null) return null; const n = Number(v); return isFinite(n) ? n : null; }
@@ -387,8 +453,15 @@ function buildReport(today) {
       const before = L.filter(l => l.date < today);
       const start = before.length ? Math.max.apply(null, before.map(l => num(l.reading))) : null;
       const fuel = todays.reduce((s, l) => s + (num(l.fuel_added_l) || 0), 0);
+      let kmTxt = '';
+      if (isYes(m.km)) {
+        const kms = todays.map(l => num(l.odometer_km)).filter(k => k != null);
+        const prevKm = L.filter(l => l.date < today).map(l => num(l.odometer_km)).filter(k => k != null);
+        if (kms.length && prevKm.length) kmTxt = ', ' + Math.round(Math.max.apply(null, kms) - Math.max.apply(null, prevKm)) + ' km';
+      }
+      const tripTxt = isYes(m.trips) ? ', ' + todays.length + ' trip' + (todays.length > 1 ? 's' : '') : '';
       logged.push(m.name + ': ' + end + ' ' + u + (start != null ? ' (' + Math.round((end - start) * 10) / 10 + ' ' + u + ' today)' : '') +
-        ' by ' + Array.from(new Set(todays.map(l => l.operator))).join(', ') + (fuel ? ', ' + fuel + ' L diesel' : ''));
+        tripTxt + kmTxt + ' by ' + Array.from(new Set(todays.map(l => l.operator))).join(', ') + (fuel ? ', ' + fuel + ' L diesel' : ''));
       todays.filter(l => String(l.defect).toLowerCase() === 'yes')
         .forEach(l => problems.push('DEFECT ' + m.name + ': ' + (l.defect_note || 'no description') + ' (' + l.operator + ')'));
     }
