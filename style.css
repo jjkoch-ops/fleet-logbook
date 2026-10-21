@@ -14,6 +14,7 @@
   --ok:#5cbd84; --ok-soft:#1d3327; --warn:#e7a948; --warn-soft:#3a2d17; --bad:#f07468; --bad-soft:#3d201e; color-scheme:dark}}
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
 .wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
