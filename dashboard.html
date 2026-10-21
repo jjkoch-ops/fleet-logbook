@@ -6,14 +6,14 @@
 <title>Fleet Dashboard</title>
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=2">
-<script src="config.js?v=2"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css?v=3">
+<script src="config.js?v=3"></script>
 </head>
 <body>
 <header class="tabs">
   <div class="wrap">
-    <div class="brand"><h1>Fleet Dashboard</h1><span id="updated"></span></div>
+    <div class="brand"><div class="mark" aria-hidden="true">FL</div><div><h1>Fleet Dashboard</h1><span id="updated">Plant hire</span></div></div>
     <button class="btn ghost small" id="refresh" type="button">Refresh</button>
     <nav role="tablist" id="tabs">
       <button role="tab" data-tab="fleet">Fleet</button>
@@ -38,14 +38,23 @@
   </section>
 
   <section data-panel="fleet" hidden>
-    <h2>Fleet status</h2>
-    <div id="attn" class="attn"></div>
+    <div class="section-head"><div><div class="eyebrow">Overview</div><h2>Fleet status</h2></div><span class="hint" id="asOf"></span></div>
+    <div id="kpis" class="kpis"></div>
+
+    <div class="section-head"><div><div class="eyebrow">Daily logs</div><h2>Last 5 days</h2></div><span class="hint">Hours or km worked, and diesel added</span></div>
+    <div id="last5"></div>
+
+    <div class="section-head"><div><div class="eyebrow">Action list</div><h2>Needs attention</h2></div></div>
+    <div id="attn" class="panel attn"></div>
+    <div id="setupNote" class="setup-note" hidden></div>
+
+    <div class="section-head"><div><div class="eyebrow">Machines</div><h2>Service and usage</h2></div></div>
     <div id="cards" class="cards"></div>
     <p class="hint" style="margin-top:20px">Machines, service intervals, operators and sites are edited in the Google Sheet (Machines, Intervals and Lists tabs).</p>
   </section>
 
   <section data-panel="history" hidden>
-    <h2>Log history</h2>
+    <div class="section-head"><div><div class="eyebrow">Records</div><h2>Log history</h2></div></div>
     <div class="toolbar">
       <div class="field"><label for="hMachine">Machine</label><select id="hMachine"></select></div>
       <div class="field"><label for="hFrom">From</label><input id="hFrom" type="date"></div>
@@ -117,7 +126,7 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.g
 const dayNum = s => { const [y,m,d] = String(s).split("-").map(Number); return Math.round(Date.UTC(y,m-1,d)/864e5); };
 const daysBetween = (a,b) => dayNum(b) - dayNum(a);
 const addDays = (s,n) => { const t = new Date((dayNum(s)+n)*864e5); return `${t.getUTCFullYear()}-${pad(t.getUTCMonth()+1)}-${pad(t.getUTCDate())}`; };
-const fmtN = (n,dp=0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-ZA",{minimumFractionDigits:dp,maximumFractionDigits:dp});
+const fmtN = (n,dp=0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-GB",{minimumFractionDigits:dp,maximumFractionDigits:dp});
 const fmtR = (n,m) => n == null ? "—" : fmtN(n, m && m.meter === "km" ? 0 : 1);
 const fmtD = s => { if(!s) return "—"; const [y,m,d] = String(s).split("-"); return `${+d} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m-1]} ${y}`; };
 const unit = m => m && m.meter === "km" ? "km" : "h";
@@ -152,7 +161,7 @@ async function load(){
       throw new Error(j.error);
     }
     D = j; $("#login").hidden = true; status("");
-    const now = new Date(); $("#updated").textContent = `Updated ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const now = new Date(); $("#updated").textContent = `Plant hire · updated ${pad(now.getHours())}:${pad(now.getMinutes())}`;
     prep(); renderSelects(); show(current);
   }catch(e){ status("Couldn't load the data. Check your connection and press Refresh.", "bad"); }
   finally{ $("#refresh").disabled = false; }
@@ -216,43 +225,107 @@ function renderActive(){
   if(current === "stock") renderStock();
 }
 
+function dayLabel(s){
+  const [y,m,d] = s.split("-").map(Number);
+  const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(Date.UTC(y,m-1,d)).getUTCDay()];
+  return {wd, dm: `${d} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m-1]}`, wknd: wd === "Sat" || wd === "Sun"};
+}
+function dayUsage(m, d){
+  const L = logsFor(m.id);
+  const onDay = L.filter(l => l.date === d);
+  if(!onDay.length) return null;
+  const end = Math.max(...onDay.map(l => l.reading));
+  const before = L.filter(l => l.date < d);
+  const start = before.length ? Math.max(...before.map(l => l.reading)) : null;
+  return {
+    used: start == null ? null : Math.max(0, end - start),
+    fuel: onDay.reduce((s,l) => s + (l.fuel_added_l||0), 0),
+    defect: onDay.some(l => l.defect),
+    ops: Array.from(new Set(onDay.map(l => l.operator).filter(Boolean)))
+  };
+}
+function renderLast5(){
+  const t = today(), days = [4,3,2,1,0].map(n => addDays(t, -n));
+  if(!D.machines.length){ $("#last5").innerHTML = ""; return; }
+  const totals = days.map(() => ({h:0, km:0, fuel:0}));
+  const rows = D.machines.map(m => {
+    const u = unit(m); let sumUsed = 0, sumFuel = 0, logged = 0;
+    const cells = days.map((d,i) => {
+      const x = dayUsage(m, d), w = dayLabel(d).wknd ? " wknd" : "";
+      if(!x) return `<td class="cell none${w}">—</td>`;
+      logged++;
+      if(x.used != null){ sumUsed += x.used; totals[i][u === "km" ? "km" : "h"] += x.used; }
+      sumFuel += x.fuel; totals[i].fuel += x.fuel;
+      const title = esc([x.ops.join(", "), x.defect ? "defect reported" : ""].filter(Boolean).join(" · "));
+      return `<td class="cell${w}${x.defect ? " def" : ""}" title="${title}"><b>${x.used == null ? "✓" : fmtN(x.used, u === "km" ? 0 : 1)}</b><i>${x.fuel ? fmtN(x.fuel) + " L" : "&nbsp;"}</i></td>`;
+    }).join("");
+    return `<tr><td class="machine"><b>${esc(m.name)}</b><small>${logged}/5 days logged</small></td>${cells}
+      <td class="total">${logged ? fmtN(sumUsed, u === "km" ? 0 : 1) + " " + u : "—"}<i>${sumFuel ? fmtN(sumFuel) + " L" : "—"}</i></td></tr>`;
+  }).join("");
+  const head = days.map(d => { const l = dayLabel(d); return `<th class="day${l.wknd ? " wknd" : ""}">${l.wd}<b>${l.dm}</b></th>`; }).join("");
+  const hasKm = D.machines.some(m => m.meter === "km");
+  const foot = totals.map((x,i) => `<td class="cell${dayLabel(days[i]).wknd ? " wknd" : ""}${x.h || x.km || x.fuel ? "" : " none"}"><b>${x.h ? fmtN(x.h,1) + " h" : x.km ? "" : "—"}</b><i>${hasKm && x.km ? fmtN(x.km) + " km · " : ""}${x.fuel ? fmtN(x.fuel) + " L" : "&nbsp;"}</i></td>`).join("");
+  const tH = totals.reduce((s,x) => s + x.h, 0), tF = totals.reduce((s,x) => s + x.fuel, 0);
+  $("#last5").innerHTML = `<div class="tbl-wrap"><table class="days"><thead><tr><th>Machine</th>${head}<th class="num">5-day total</th></tr></thead>
+    <tbody>${rows}</tbody><tfoot><tr><td>Fleet</td>${foot}<td class="total">${fmtN(tH,1)} h<i>${tF ? fmtN(tF) + " L" : "—"}</i></td></tr></tfoot></table></div>
+    <div class="hint" style="margin-top:8px">— no log submitted · red figure means a defect was reported that day · hover a day to see the operator</div>`;
+}
+
 function renderFleet(){
-  const t = today(), items = [];
-  if(!D.machines.length){ $("#attn").innerHTML = ""; $("#cards").innerHTML = `<div class="empty">No machines yet. Add them on the Machines tab of the Google Sheet.</div>`; return; }
+  const t = today(), items = [], setup = [];
+  $("#asOf").textContent = `As of ${fmtD(t)}`;
+  if(!D.machines.length){ $("#kpis").innerHTML = ""; $("#last5").innerHTML = ""; $("#attn").innerHTML = ""; $("#cards").innerHTML = `<div class="empty">No machines yet. Add them on the Machines tab of the Google Sheet.</div>`; return; }
+  let due = 0, overdue = 0, defects = 0, loggedToday = 0, wkHours = 0, wkFuel = 0;
+  const wkStart = addDays(t, -6);
   const cards = D.machines.map(m => {
     const st = stats(m), u = unit(m);
+    D.logs.filter(l => l.machine_id === m.id && l.date >= wkStart).forEach(l => wkFuel += l.fuel_added_l || 0);
+    if(u === "h") for(let i = 0; i < 7; i++){ const x = dayUsage(m, addDays(t, -i)); if(x && x.used != null) wkHours += x.used; }
+    if(st.lastDate === t) loggedToday++;
     st.svc.forEach(s => {
-      if(s.state === "bad") items.push(["bad","Overdue",`${m.name}: ${s.service} overdue by ${fmtR(-s.remaining,m)} ${u}`]);
-      else if(s.state === "warn") items.push(["warn","Due soon",`${m.name}: ${s.service} due in ${fmtR(s.remaining,m)} ${u}${s.eta ? " (around " + fmtD(s.eta) + ")" : ""}`]);
-      else items.push.apply(items, s.state === "base" ? [["info","Setup",`${m.name}: fill in last_done_at for ${s.service} on the Intervals tab`]] : []);
+      if(s.state === "bad"){ overdue++; items.push(["bad","Overdue",`${m.name}: ${s.service} overdue by ${fmtR(-s.remaining,m)} ${u}`]); }
+      else if(s.state === "warn"){ due++; items.push(["warn","Due soon",`${m.name}: ${s.service} due in ${fmtR(s.remaining,m)} ${u}${s.eta ? " (around " + fmtD(s.eta) + ")" : ""}`]); }
+      else if(s.state === "base") setup.push(`${m.name} – ${s.service}`);
     });
-    if(st.defects.length) items.push(["bad","Defect",`${m.name}: ${st.defects.length} defect report${st.defects.length>1?"s":""} in 14 days. Latest: “${st.defects[st.defects.length-1].defect_note || "no description"}”`]);
-    if(st.lastDate && st.lastDate < t){ const d = daysBetween(st.lastDate, t); items.push([d > 2 ? "warn" : "info", "No log", `${m.name}: last log ${d === 1 ? "yesterday" : d + " days ago"}`]); }
+    if(st.defects.length){ defects += st.defects.length; items.push(["bad","Defect",`${m.name}: ${st.defects.length} defect report${st.defects.length>1?"s":""} in 14 days. Latest: “${st.defects[st.defects.length-1].defect_note || "no description"}”`]); }
+    if(st.lastDate && st.lastDate < t){ const d = daysBetween(st.lastDate, t); if(d > 1) items.push([d > 2 ? "warn" : "info", "No log", `${m.name}: last log ${d} days ago (${fmtD(st.lastDate)})`]); }
     if(!st.lastDate) items.push(["info","No log",`${m.name}: no logs yet`]);
-    const pill = !st.lastDate ? `<span class="pill info">No logs</span>` : st.lastDate === t ? `<span class="pill ok">Logged today</span>` : `<span class="pill ${daysBetween(st.lastDate,t)>2?"warn":"info"}">Last log ${fmtD(st.lastDate)}</span>`;
+    const pill = !st.lastDate ? `<span class="pill info plain">No logs</span>` : st.lastDate === t ? `<span class="pill ok plain">Logged today</span>` : `<span class="pill ${daysBetween(st.lastDate,t)>2?"warn":"info"} plain">Last log ${fmtD(st.lastDate)}</span>`;
     const svcHtml = st.svc.length ? st.svc.map(s => {
-      if(s.state === "base") return `<div class="svc"><div class="svc-top"><b>${esc(s.service)}</b><span class="pill info">Needs last-service reading</span></div></div>`;
+      if(s.state === "base") return `<div class="svc"><div class="svc-top"><b>${esc(s.service)}</b><span class="hint">Last service not set</span></div><div class="bar"></div></div>`;
       const txt = s.remaining < 0 ? `Overdue ${fmtR(-s.remaining,m)} ${u}` : `${fmtR(s.remaining,m)} ${u} to go`;
       return `<div class="svc"><div class="svc-top"><b>${esc(s.service)}</b><span>${txt}</span></div>
-        <div class="bar" role="img" aria-label="${Math.round(s.used*100)}% of interval used"><i class="${s.state === "ok" ? "" : s.state}" style="width:${Math.max(3, Math.round(s.used*100))}%"></i></div>
+        <div class="bar" role="img" aria-label="${Math.round(s.used*100)}% of interval used"><i class="${s.state === "ok" ? "" : s.state}" style="width:${Math.max(2, Math.round(s.used*100))}%"></i></div>
         <div class="hint">Due at ${fmtR(s.due,m)} ${u}${s.eta ? " · around " + fmtD(s.eta) : ""}</div></div>`;
     }).join("") : `<div class="hint">No service intervals on the Intervals tab.</div>`;
     return `<article class="card">
       <div class="card-head"><div><h3>${esc(m.name)}</h3><small>${esc(m.type||"")}</small></div>${pill}</div>
-      <div class="big">${fmtR(st.cur,m)}<span>${u}</span></div>
-      ${svcHtml}
+      <div class="card-body"><div class="big">${fmtR(st.cur,m)}<span>${u}</span></div>${svcHtml}</div>
       <div class="kv">
         <div><span>Avg / day</span><b>${st.avg == null ? "—" : fmtN(st.avg, u === "km" ? 0 : 1) + " " + u}</b></div>
         <div><span>Fuel burn</span><b>${st.burn == null ? "—" : fmtN(st.burn, u === "km" ? 2 : 1) + " L/" + u}</b></div>
         <div><span>Fuel level</span><b>${st.last ? fuelTxt(st.last.fuel_pct) : "—"}</b></div>
       </div></article>`;
   });
-  D.parts.filter(p => p.qty <= p.reorder_at).forEach(p => items.push(["warn","Reorder",`${p.name}${p.part_no ? " (" + p.part_no + ")" : ""}: ${fmtN(p.qty)} ${p.unit||""} left, reorder at ${fmtN(p.reorder_at)}`]));
+  const low = D.parts.filter(p => p.qty <= p.reorder_at);
+  low.forEach(p => items.push(["warn","Reorder",`${p.name}${p.part_no ? " (" + p.part_no + ")" : ""}: ${fmtN(p.qty)} ${p.unit||""} left, reorder at ${fmtN(p.reorder_at)}`]));
   const order = {bad:0, warn:1, info:2};
   items.sort((a,b) => order[a[0]] - order[b[0]]);
+
+  const n = D.machines.length;
+  $("#kpis").innerHTML = `
+    <div class="kpi"><div class="eyebrow">Logged today</div><div class="val">${loggedToday}<small>/ ${n}</small></div><div class="sub">machines with a log for ${fmtD(t)}</div></div>
+    <div class="kpi"><div class="eyebrow">Hours, last 7 days</div><div class="val">${fmtN(wkHours,1)}<small>h</small></div><div class="sub">across hour-meter machines</div></div>
+    <div class="kpi"><div class="eyebrow">Diesel, last 7 days</div><div class="val">${fmtN(wkFuel)}<small>L</small></div><div class="sub">added, as logged by drivers</div></div>
+    <div class="kpi ${overdue || defects ? "bad" : due ? "warn" : ""}"><div class="eyebrow">Open issues</div><div class="val">${overdue + due + defects}</div><div class="sub">${overdue + due} service${overdue + due === 1 ? "" : "s"} due${overdue ? " (" + overdue + " overdue)" : ""} · ${defects} defect${defects === 1 ? "" : "s"} (14 days)</div></div>`;
+
+  renderLast5();
+
   $("#attn").innerHTML = items.length
-    ? `<h3 style="margin-bottom:2px">Needs attention</h3>` + items.map(([k,l,txt]) => `<div class="item"><span class="pill ${k}">${l}</span><span>${esc(txt)}</span></div>`).join("")
+    ? items.map(([k,l,txt]) => `<div class="item"><span class="pill ${k}">${l}</span><span>${esc(txt)}</span></div>`).join("")
     : `<div class="item"><span class="pill ok">All clear</span><span>Nothing overdue, no defects, stock above reorder levels.</span></div>`;
+  $("#setupNote").hidden = !setup.length;
+  $("#setupNote").textContent = setup.length ? `Service countdowns not started for ${setup.join(", ")}. Add the last-service reading (last_done_at) on the Intervals tab.` : "";
   $("#cards").innerHTML = cards.join("");
 }
 
