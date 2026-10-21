@@ -294,7 +294,7 @@ function savePhoto(dataUrl, name) {
   return folder.createFile(blob).getUrl();
 }
 
-function num(v) { const n = Number(v); return isFinite(n) ? n : null; }
+function num(v) { if (v === '' || v == null) return null; const n = Number(v); return isFinite(n) ? n : null; }
 
 function json(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
