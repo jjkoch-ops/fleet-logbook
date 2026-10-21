@@ -75,6 +75,33 @@ Your browser   ──► dashboard.html            ──┘
 - **Record a service** on the dashboard's Service tab. It resets that service's countdown and takes the parts used off stock.
 - **Change the PIN** (e.g. when a driver leaves) under Script properties. Drivers re-enter it once.
 
+## Daily report (email and WhatsApp)
+
+Every evening you get a summary: machines **not logged today**, what was logged (hours worked, operator, diesel), defects reported, services overdue or due soon, and parts to reorder.
+
+1. Paste the latest `Code.gs` into Apps Script and save (and redeploy: **Deploy → Manage deployments → Edit → New version → Deploy**).
+2. In the function dropdown choose **testReport** → **Run**. Approve the new permissions (sending email, scheduling). Check your inbox.
+3. Choose **installDailyReport** → **Run**. The report now goes out every day at about 18:00.
+4. Check **Project Settings → Time zone** is *(GMT+02:00) Johannesburg*.
+
+Optional script properties (**Project Settings → Script properties**):
+
+| Property | Default | Use |
+|---|---|---|
+| `NOTIFY_EMAIL` | your Google account | Send to another address, or several separated by commas |
+| `REPORT_HOUR` | `18` | Hour to send (0–23). Run `installDailyReport` again after changing it |
+| `SKIP_DAYS` | `Sun` | Days with no report, e.g. `Sat,Sun` |
+
+### WhatsApp to your own phone (optional, free)
+
+Uses [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/), a free third-party service that sends WhatsApp messages to **your own number only** (not to a group).
+
+1. Check the current CallMeBot number on their website and save it in your contacts.
+2. Send it the WhatsApp message: `I allow callmebot to send me messages`
+3. It replies with your API key.
+4. Add script properties `CALLMEBOT_PHONE` (e.g. `+27821234567`) and `CALLMEBOT_APIKEY`.
+5. Run **testReport** to check.
+
 ## Updating the script
 
 If `Code.gs` changes: paste the new version into Apps Script, then **Deploy → Manage deployments → Edit (pencil) → Version: New version → Deploy**. The URL stays the same.

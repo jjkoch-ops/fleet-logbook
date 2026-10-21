@@ -7,8 +7,8 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=3">
-<script src="config.js?v=3"></script>
+<link rel="stylesheet" href="style.css?v=4">
+<script src="config.js?v=4"></script>
 </head>
 <body>
 <header class="tabs">
@@ -38,18 +38,18 @@
   </section>
 
   <section data-panel="fleet" hidden>
-    <div class="section-head"><div><div class="eyebrow">Overview</div><h2>Fleet status</h2></div><span class="hint" id="asOf"></span></div>
-    <div id="kpis" class="kpis"></div>
+    <div class="section-head"><div><div class="eyebrow">Machines</div><h2>Fleet status</h2></div><span class="hint" id="asOf"></span></div>
+    <div id="cards" class="cards"></div>
+    <div id="setupNote" class="setup-note" hidden></div>
+
+    <div class="section-head"><div><div class="eyebrow">Action list</div><h2>Needs attention</h2></div></div>
+    <div id="attn" class="panel attn"></div>
 
     <div class="section-head"><div><div class="eyebrow">Daily logs</div><h2>Last 5 days</h2></div><span class="hint">Hours or km worked, and diesel added</span></div>
     <div id="last5"></div>
 
-    <div class="section-head"><div><div class="eyebrow">Action list</div><h2>Needs attention</h2></div></div>
-    <div id="attn" class="panel attn"></div>
-    <div id="setupNote" class="setup-note" hidden></div>
-
-    <div class="section-head"><div><div class="eyebrow">Machines</div><h2>Service and usage</h2></div></div>
-    <div id="cards" class="cards"></div>
+    <div class="section-head"><div><div class="eyebrow">Summary</div><h2>This week</h2></div></div>
+    <div id="kpis" class="kpis"></div>
     <p class="hint" style="margin-top:20px">Machines, service intervals, operators and sites are edited in the Google Sheet (Machines, Intervals and Lists tabs).</p>
   </section>
 

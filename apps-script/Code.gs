@@ -299,3 +299,115 @@ function num(v) { if (v === '' || v == null) return null; const n = Number(v); r
 function json(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
+
+/* ------------------------------------------------------------------ */
+/* Daily report — email (and optional WhatsApp) at the end of the day  */
+/*                                                                     */
+/* Run installDailyReport() once to schedule it. Run testReport() to   */
+/* send one now. Optional script properties:                           */
+/*   NOTIFY_EMAIL      – where to send (default: your Google account)  */
+/*   REPORT_HOUR       – hour of day to send, 0-23 (default 18)        */
+/*   SKIP_DAYS         – days with no report, e.g. "Sun" or "Sat,Sun"  */
+/*   CALLMEBOT_PHONE   – your WhatsApp number, e.g. +27821234567       */
+/*   CALLMEBOT_APIKEY  – key from CallMeBot (see README)               */
+/*   DASHBOARD_URL     – link added to the message                     */
+/* ------------------------------------------------------------------ */
+
+function installDailyReport() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'dailyReport')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  const hour = Number(PropertiesService.getScriptProperties().getProperty('REPORT_HOUR') || 18);
+  ScriptApp.newTrigger('dailyReport').timeBased().everyDays(1).atHour(hour).create();
+  Logger.log('Daily report scheduled for about ' + hour + ':00 (' + Session.getScriptTimeZone() + ').');
+}
+
+function testReport() { dailyReport(true); }
+
+function dailyReport(force) {
+  const props = PropertiesService.getScriptProperties();
+  const tz = Session.getScriptTimeZone();
+  const now = new Date();
+  const today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const weekday = Utilities.formatDate(now, tz, 'EEE');
+  const skip = String(props.getProperty('SKIP_DAYS') || 'Sun').split(',').map(s => s.trim());
+  if (force !== true && skip.indexOf(weekday) !== -1) return;
+
+  const r = buildReport(today);
+  const dash = props.getProperty('DASHBOARD_URL') || 'https://jjkoch-ops.github.io/fleet-logbook/dashboard.html';
+  const title = 'Fleet report ' + Utilities.formatDate(now, tz, 'EEE d MMM') + ' — ' +
+    (r.missing.length ? r.missing.length + ' not logged' : 'all logged') +
+    (r.problems.length ? ', ' + r.problems.length + ' issue' + (r.problems.length > 1 ? 's' : '') : '');
+
+  const lines = [];
+  lines.push(r.missing.length ? 'NOT LOGGED TODAY: ' + r.missing.join(', ') : 'All machines logged today.');
+  if (r.logged.length) { lines.push(''); lines.push('Logged today:'); r.logged.forEach(x => lines.push('• ' + x)); }
+  if (r.problems.length) { lines.push(''); lines.push('Needs attention:'); r.problems.forEach(x => lines.push('• ' + x)); }
+  lines.push(''); lines.push('Dashboard: ' + dash);
+  const text = lines.join('\n');
+
+  const to = props.getProperty('NOTIFY_EMAIL') || Session.getEffectiveUser().getEmail();
+  if (to) {
+    const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const list = arr => '<ul style="margin:6px 0 14px;padding-left:18px">' + arr.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>';
+    const html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#15191e;max-width:560px">' +
+      '<div style="border-top:3px solid #d18a00;padding-top:10px;font-size:18px;font-weight:bold">Fleet report — ' + esc(Utilities.formatDate(now, tz, 'EEEE d MMMM')) + '</div>' +
+      (r.missing.length ? '<p style="background:#fbe4e2;color:#b4342b;padding:10px 12px;border-radius:6px"><b>Not logged today:</b> ' + esc(r.missing.join(', ')) + '</p>'
+                        : '<p style="background:#e3f3ea;color:#1f7a48;padding:10px 12px;border-radius:6px"><b>All machines logged today.</b></p>') +
+      (r.logged.length ? '<b>Logged today</b>' + list(r.logged) : '') +
+      (r.problems.length ? '<b>Needs attention</b>' + list(r.problems) : '') +
+      '<p><a href="' + esc(dash) + '">Open the dashboard</a></p></div>';
+    MailApp.sendEmail({ to: to, subject: title, body: text, htmlBody: html });
+  }
+
+  const phone = props.getProperty('CALLMEBOT_PHONE'), key = props.getProperty('CALLMEBOT_APIKEY');
+  if (phone && key) {
+    const msg = '*' + title + '*\n\n' + text;
+    UrlFetchApp.fetch('https://api.callmebot.com/whatsapp.php?phone=' + encodeURIComponent(phone) +
+      '&text=' + encodeURIComponent(msg.slice(0, 1500)) + '&apikey=' + encodeURIComponent(key), { muteHttpExceptions: true });
+  }
+}
+
+function buildReport(today) {
+  const machines = rows('Machines').filter(m => m.id);
+  const logs = rows('Logs').filter(l => l.machine_id);
+  const intervals = rows('Intervals').filter(i => i.machine_id);
+  const parts = rows('Parts').filter(p => p.id);
+  const dayNum = s => { const p = String(s).split('-').map(Number); return Math.round(Date.UTC(p[0], p[1] - 1, p[2]) / 864e5); };
+  const missing = [], logged = [], problems = [];
+
+  machines.forEach(m => {
+    const u = m.meter === 'km' ? 'km' : 'h';
+    const L = logs.filter(l => l.machine_id === m.id).sort((a, b) => num(a.reading) - num(b.reading));
+    const todays = L.filter(l => l.date === today);
+    const cur = L.length ? num(L[L.length - 1].reading) : num(m.baseline);
+    if (!todays.length) missing.push(m.name);
+    else {
+      const end = Math.max.apply(null, todays.map(l => num(l.reading)));
+      const before = L.filter(l => l.date < today);
+      const start = before.length ? Math.max.apply(null, before.map(l => num(l.reading))) : null;
+      const fuel = todays.reduce((s, l) => s + (num(l.fuel_added_l) || 0), 0);
+      logged.push(m.name + ': ' + end + ' ' + u + (start != null ? ' (' + Math.round((end - start) * 10) / 10 + ' ' + u + ' today)' : '') +
+        ' by ' + Array.from(new Set(todays.map(l => l.operator))).join(', ') + (fuel ? ', ' + fuel + ' L diesel' : ''));
+      todays.filter(l => String(l.defect).toLowerCase() === 'yes')
+        .forEach(l => problems.push('DEFECT ' + m.name + ': ' + (l.defect_note || 'no description') + ' (' + l.operator + ')'));
+    }
+    // average use per day over the last 30 days, for "due soon"
+    const recent = L.filter(l => dayNum(today) - dayNum(l.date) <= 30);
+    let avg = 0;
+    if (recent.length >= 2) {
+      const span = Math.max(1, dayNum(recent[recent.length - 1].date) - dayNum(recent[0].date));
+      avg = (num(recent[recent.length - 1].reading) - num(recent[0].reading)) / span;
+    }
+    intervals.filter(i => i.machine_id === m.id && i.last_done_at !== '' && num(i.every)).forEach(i => {
+      if (cur == null) return;
+      const remaining = num(i.last_done_at) + num(i.every) - cur;
+      if (remaining < 0) problems.push('OVERDUE ' + m.name + ': ' + i.service + ' by ' + Math.round(-remaining) + ' ' + u);
+      else if (remaining <= Math.max(num(i.every) * 0.1, avg * 7)) problems.push('DUE SOON ' + m.name + ': ' + i.service + ' in ' + Math.round(remaining) + ' ' + u);
+    });
+  });
+  parts.forEach(p => {
+    if ((num(p.qty) || 0) <= (num(p.reorder_at) || 0)) problems.push('REORDER ' + p.name + ': ' + (num(p.qty) || 0) + ' ' + (p.unit || '') + ' left');
+  });
+  return { missing, logged, problems };
+}
