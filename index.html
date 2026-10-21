@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#e5a00d">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=5">
-<script src="config.js?v=5"></script>
+<link rel="stylesheet" href="style.css?v=6">
+<script src="config.js?v=6"></script>
 </head>
 <body>
 <header>
@@ -99,14 +99,26 @@ function render(){
   if(!cfg) return;
   fill("#machine", cfg.machines.map(m => [m.id, m.name]), "Choose machine");
   fill("#operator", cfg.operators.map(o => [o,o]), "Choose your name");
-  fill("#site", cfg.sites.map(o => [o,o]), cfg.sites.length ? "Choose site" : "—");
-  fill("#tripFrom", cfg.sites.map(o => [o,o]), "Choose start");
-  fill("#tripTo", cfg.sites.map(o => [o,o]), "Choose destination");
+  const siteOpts = [...cfg.sites.map(o => [o,o]), ["__new__", "+ Add new site"]];
+  fill("#site", siteOpts, "Choose site");
+  fill("#tripFrom", siteOpts, "Choose start");
+  fill("#tripTo", siteOpts, "Choose destination");
   $("#materials").innerHTML = (cfg.materials || []).map(x => `<option value="${String(x).replace(/"/g,"&quot;")}">`).join("");
   const lastOp = store.get("fl_operator", ""); if(lastOp && !$("#operator").value && cfg.operators.includes(lastOp)) $("#operator").value = lastOp;
   hint();
 }
 const machine = () => cfg && cfg.machines.find(m => m.id === $("#machine").value);
+
+/* "+ Add new site": show a text box under the dropdown */
+["site","tripFrom","tripTo"].forEach(id => {
+  const sel = document.getElementById(id);
+  const inp = document.createElement("input");
+  inp.id = id + "New"; inp.placeholder = "Type the new site name"; inp.autocomplete = "off"; inp.hidden = true; inp.maxLength = 80;
+  inp.setAttribute("aria-label", "New site name");
+  sel.insertAdjacentElement("afterend", inp);
+  sel.addEventListener("change", () => { inp.hidden = sel.value !== "__new__"; if(!inp.hidden) inp.focus(); });
+});
+const siteVal = id => { const v = $("#" + id).value; return v === "__new__" ? $("#" + id + "New").value.trim().replace(/\s+/g, " ") : v; };
 
 function modeFields(){
   const m = machine();
@@ -224,8 +236,9 @@ $("#f").addEventListener("submit", async e => {
   if(isNaN(parseFloat($("#reading").value))) return fail("Enter the meter reading.");
   if(fuelPct == null) return fail("Tap the fuel level.");
   if(defect && !$("#defectNote").value.trim()) return fail("Describe the defect.");
-  if(m.trips && !$("#tripFrom").value) return fail("Choose where the trip started.");
-  if(m.trips && !$("#tripTo").value) return fail("Choose where the trip ended.");
+  if(m.trips && !siteVal("tripFrom")) return fail($("#tripFrom").value === "__new__" ? "Type the name of the new start site." : "Choose where the trip started.");
+  if(m.trips && !siteVal("tripTo")) return fail($("#tripTo").value === "__new__" ? "Type the name of the new destination." : "Choose where the trip ended.");
+  if(!m.trips && $("#site").value === "__new__" && !siteVal("site")) return fail("Type the name of the new site.");
   const kc = kmCheck(); if(!kc.ok) return fail(kc.msg);
   if(!$("#pin").value.trim()) return fail("Enter the site PIN.");
   const chk = hint(); if(!chk.ok) return fail(chk.msg);
@@ -233,14 +246,16 @@ $("#f").addEventListener("submit", async e => {
   const btn = $("#submit"); btn.disabled = true; btn.textContent = "Sending…";
   const body = {
     action:"log", pin: $("#pin").value.trim(), machine_id: m.id, machine_name: m.name,
-    operator: $("#operator").value, site: $("#site").value, date: $("#date").value,
+    operator: $("#operator").value, site: m.trips ? "" : siteVal("site"), date: $("#date").value,
     reading: parseFloat($("#reading").value), fuel_pct: fuelPct, fuel_added: parseFloat($("#fuelAdded").value) || 0,
     defect, defect_note: defect ? $("#defectNote").value.trim() : "",
     odometer_km: m.km ? parseFloat($("#km").value) : null,
-    trip_from: m.trips ? $("#tripFrom").value : "", trip_to: m.trips ? $("#tripTo").value : "", material: m.trips ? $("#material").value.trim() : "",
+    trip_from: m.trips ? siteVal("tripFrom") : "", trip_to: m.trips ? siteVal("tripTo") : "", material: m.trips ? $("#material").value.trim() : "",
     photo: await resizePhoto($("#photo").files[0]), client_id: Date.now().toString(36) + Math.random().toString(36).slice(2,6)
   };
   store.set("fl_operator", body.operator);
+  [body.site, body.trip_from, body.trip_to].forEach(v => { if(v && !cfg.sites.some(x => x.toLowerCase() === v.toLowerCase())) cfg.sites.push(v); });
+  if(body.material && !(cfg.materials || []).some(x => x.toLowerCase() === body.material.toLowerCase())) (cfg.materials = cfg.materials || []).push(body.material);
   const u = m.meter === "km" ? "km" : "h";
   try{
     const res = await post(body);
@@ -264,7 +279,10 @@ $("#another").addEventListener("click", () => {
   const keep = machine() && machine().trips;
   if(!keep) $("#machine").value = "";
   $("#km").value = ""; $("#material").value = "";
-  if(keep){ $("#tripFrom").value = $("#tripTo").value; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
+  const lastTo = siteVal("tripTo");
+  render();
+  ["site","tripFrom","tripTo"].forEach(id => { $("#" + id + "New").value = ""; $("#" + id + "New").hidden = true; if($("#" + id).value === "__new__") $("#" + id).value = ""; });
+  if(keep){ $("#tripFrom").value = lastTo; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
   fuelPct = null; defect = false; $$("#fuel button").forEach(b => b.setAttribute("aria-pressed","false"));
   $$("#defect button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === "no")); $("#defectWrap").hidden = true;
   $("#done").hidden = true; $("#f").hidden = false; hint();

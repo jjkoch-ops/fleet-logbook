@@ -229,6 +229,10 @@ function saveLog(b) {
     try { photoUrl = savePhoto(b.photo, machine.name + ' ' + b.date + ' ' + reading); } catch (err) { photoUrl = ''; }
   }
 
+  // Remember new sites / materials typed by drivers
+  [b.site, b.trip_from, b.trip_to].forEach(v => addToList(1, v));
+  addToList(2, b.material);
+
   appendByHeader('Logs', {
     timestamp: new Date(), date: String(b.date), machine_id: machine.id, machine: machine.name, operator: b.operator,
     site: String(b.site || ''), reading: reading, fuel_pct: fuel, fuel_added_l: Number(b.fuel_added) || 0,
@@ -343,6 +347,19 @@ function savePhoto(dataUrl, name) {
   const it = DriveApp.getFoldersByName(PHOTO_FOLDER);
   const folder = it.hasNext() ? it.next() : DriveApp.createFolder(PHOTO_FOLDER);
   return folder.createFile(blob).getUrl();
+}
+
+/** Add value to Lists column (0 = Operators, 1 = Sites, 2 = Materials) if it isn't there yet. */
+function addToList(col, value) {
+  const v = String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (!v) return;
+  const sh = sheet('Lists');
+  const vals = sh.getDataRange().getValues();
+  const have = vals.slice(1).map(r => String(r[col] || '').trim().toLowerCase());
+  if (have.indexOf(v.toLowerCase()) !== -1) return;
+  let row = 2;
+  while (row <= vals.length && String((vals[row - 1] || [])[col] || '').trim() !== '') row++;
+  sh.getRange(row, col + 1).setValue(v);
 }
 
 function isYes(v) { return ['yes', 'y', 'true', '1'].indexOf(String(v).trim().toLowerCase()) !== -1; }
