@@ -7,8 +7,8 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=5">
-<script src="config.js?v=5"></script>
+<link rel="stylesheet" href="style.css?v=8">
+<script src="config.js?v=8"></script>
 </head>
 <body>
 <header class="tabs">
@@ -366,11 +366,11 @@ function renderHistory(){
   const tripRows = rows.filter(l => byM[l.machine_id] && byM[l.machine_id].trips);
   const showTrip = rows.some(l => byM[l.machine_id] && (byM[l.machine_id].trips || byM[l.machine_id].km));
   const prevKm = l => { const K = D.logs.filter(x => x.machine_id === l.machine_id && x.odometer_km != null && x.odometer_km < l.odometer_km); return K.length ? Math.max(...K.map(x => x.odometer_km)) : null; };
-  let tripKm = 0; tripRows.forEach(l => { const pk = l.odometer_km != null ? prevKm(l) : null; if(pk != null) tripKm += l.odometer_km - pk; });
+  let tripKm = 0; tripRows.forEach(l => { const pk = l.start_km != null ? l.start_km : l.odometer_km != null ? prevKm(l) : null; if(pk != null && l.odometer_km != null) tripKm += l.odometer_km - pk; });
   $("#hSummary").textContent = `${rows.length} entr${rows.length === 1 ? "y" : "ies"}${tripRows.length ? ` · ${tripRows.length} trip${tripRows.length === 1 ? "" : "s"}, ${fmtN(tripKm)} km` : ""} · ${fmtN(fuel)} L diesel added. Full data is in the Logs tab of your Google Sheet.`;
   const prev = l => { const L = logsFor(l.machine_id); const i = L.indexOf(l); return i > 0 ? L[i-1].reading : null; };
-  $("#hTable").innerHTML = `<div class="tbl-wrap"><table class="hist"><thead><tr><th>Date</th><th>Machine</th><th>Operator</th><th>${showTrip ? "Site / trip" : "Site"}</th><th class="num">Hours</th><th class="num">Used</th>${showTrip ? `<th class="num">Odometer</th><th class="num">Km</th>` : ""}<th class="num">Fuel</th><th class="num">Added</th><th>Defect</th><th>Photo</th></tr></thead><tbody>` +
-    rows.slice(0,500).map(l => { const m = byM[l.machine_id], p = prev(l), pk = l.odometer_km != null ? prevKm(l) : null;
+  $("#hTable").innerHTML = `<div class="tbl-wrap"><table class="hist"><thead><tr><th>Date</th><th>Machine</th><th>Operator</th><th>${showTrip ? "Site / start → stop" : "Site"}</th><th class="num">Hours</th><th class="num">Used</th>${showTrip ? `<th class="num">Odometer</th><th class="num">Km</th>` : ""}<th class="num">Fuel</th><th class="num">Added</th><th>Defect</th><th>Photo</th></tr></thead><tbody>` +
+    rows.slice(0,500).map(l => { const m = byM[l.machine_id], p = l.start_hours != null ? l.start_hours : prev(l), pk = l.start_km != null ? l.start_km : l.odometer_km != null ? prevKm(l) : null;
       const where = l.trip_from || l.trip_to ? `${esc(l.trip_from)} → ${esc(l.trip_to)}${l.material ? `<div class="hint">${esc(l.material)}</div>` : ""}` : esc(l.site);
       return `<tr><td>${fmtD(l.date)}</td><td>${esc(m ? m.name : l.machine)}</td><td>${esc(l.operator)}</td><td>${where}</td>
       <td class="num">${fmtR(l.reading,m)} ${unit(m)}</td><td class="num">${p == null ? "—" : fmtR(l.reading - p, m)}</td>

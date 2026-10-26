@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#e5a00d">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=6">
-<script src="config.js?v=6"></script>
+<link rel="stylesheet" href="style.css?v=8">
+<script src="config.js?v=8"></script>
 </head>
 <body>
 <header>
@@ -26,7 +26,7 @@
   </div>
 
   <form id="f" class="form" novalidate>
-    <p class="lead" style="margin:0" id="leadTxt">Fill this in at the end of each shift, one entry per machine. Trucks: one entry after each trip.</p>
+    <p class="lead" style="margin:0" id="leadTxt">Fill this in at the end of each shift, one entry per machine. Trucks: one entry per trip, like the logbook.</p>
     <div class="row2">
       <div class="field"><label for="date">Date</label><input id="date" type="date" required></div>
       <div class="field"><label for="machine">Machine</label><select id="machine" required></select></div>
@@ -37,20 +37,24 @@
     </div>
     <div id="tripWrap" class="form" hidden>
       <div class="row2">
-        <div class="field"><label for="tripFrom">Trip from</label><select id="tripFrom"></select></div>
-        <div class="field"><label for="tripTo">Trip to</label><select id="tripTo"></select></div>
+        <div class="field"><label for="tripFrom">Start location</label><select id="tripFrom"></select></div>
+        <div class="field"><label for="tripTo">Stop location</label><select id="tripTo"></select></div>
       </div>
       <div class="field"><label for="material">Material / load</label><input id="material" list="materials" placeholder="e.g. G5, sand, rubble" autocomplete="off"><datalist id="materials"></datalist></div>
     </div>
+    <div id="meters" class="meters">
+      <div class="field" id="startHWrap" hidden><label for="startH">Start hours</label><div class="meter-wrap"><input id="startH" class="meter" type="number" inputmode="decimal" step="0.1" min="0"><span class="unit">h</span></div></div>
     <div class="field">
       <label for="reading" id="readingLbl">Hour meter</label>
       <div class="meter-wrap"><input id="reading" class="meter" type="number" inputmode="decimal" step="0.1" min="0" required><span class="unit" id="unit">h</span></div>
       <div class="hint" id="readingHint"></div>
     </div>
+      <div class="field" id="startKmWrap" hidden><label for="startKm">Start km</label><div class="meter-wrap"><input id="startKm" class="meter" type="number" inputmode="numeric" step="1" min="0"><span class="unit">km</span></div></div>
     <div class="field" id="kmWrap" hidden>
-      <label for="km">Odometer</label>
+      <label for="km" id="kmLbl">Odometer</label>
       <div class="meter-wrap"><input id="km" class="meter" type="number" inputmode="numeric" step="1" min="0"><span class="unit">km</span></div>
       <div class="hint" id="kmHint"></div>
+    </div>
     </div>
     <div class="field">
       <span class="lbl" id="fuelLbl">Fuel level now</span>
@@ -125,31 +129,61 @@ function modeFields(){
   $("#kmWrap").hidden = !(m && m.km);
   $("#tripWrap").hidden = !(m && m.trips);
   $("#siteWrap").hidden = !!(m && m.trips);
+  $("#startHWrap").hidden = $("#startKmWrap").hidden = !(m && m.trips);
+  $("#meters").classList.toggle("trip", !!(m && m.trips));
+  $("#kmLbl").textContent = m && m.trips ? "End km" : "Odometer";
   $("#submit").textContent = m && m.trips ? "Submit trip" : "Submit log";
   const kh = $("#kmHint");
-  if(m && m.km) kh.textContent = m.lastKm != null ? `Last odometer ${m.lastKm} km.` : "First odometer reading for this machine.";
+  if(m && m.km && !m.trips) kh.textContent = m.lastKm != null ? `Last odometer ${m.lastKm} km.` : "First odometer reading for this machine.";
 }
+/* Trucks: start readings and start location carry over from the last trip */
+function prefillTrip(){
+  const m = machine(); if(!m || !m.trips) return;
+  $("#startH").value = m.last ? m.last.reading : "";
+  $("#startKm").value = m.lastKm != null ? m.lastKm : "";
+  if(m.lastTo && cfg.sites.includes(m.lastTo)) $("#tripFrom").value = m.lastTo;
+}
+const startNum = id => { const v = parseFloat($("#" + id).value); return isNaN(v) ? null : v; };
 function kmCheck(){
   const m = machine(); if(!m || !m.km) return {ok:true};
   const v = parseFloat($("#km").value), kh = $("#kmHint"); kh.className = "hint";
-  if(isNaN(v)) return {ok:false, msg:"Enter the odometer (km)."};
+  if(isNaN(v)) return {ok:false, msg: m.trips ? "Enter the end km." : "Enter the odometer (km)."};
+  if(m.trips){
+    const sk = startNum("startKm");
+    if(sk != null && m.lastKm != null && sk < m.lastKm) return {ok:false, msg:`Start km is lower than where the last trip ended (${m.lastKm} km).`};
+    if(sk != null && v < sk){ kh.className = "hint bad"; kh.textContent = "End km is lower than start km."; return {ok:false, msg:"End km must be the same as or higher than start km."}; }
+    kh.textContent = sk != null ? `Trip distance: ${Math.round(v - sk)} km.` : "";
+    return {ok:true};
+  }
   if(m.lastKm != null && v < m.lastKm){ kh.className = "hint bad"; kh.textContent = `Lower than the last odometer (${m.lastKm} km). Check it.`; return {ok:false, msg:`The odometer is lower than the last one (${m.lastKm} km).`}; }
   if(m.lastKm != null){ kh.textContent = `${Math.round(v - m.lastKm)} km since the last entry (last ${m.lastKm} km).`; if(v - m.lastKm > 1500){ kh.className = "hint warn"; } }
   return {ok:true};
 }
 $("#km").addEventListener("input", kmCheck);
+$("#startKm").addEventListener("input", kmCheck);
+$("#startH").addEventListener("input", () => hint());
 
 function hint(){
   modeFields();
   const m = machine(), h = $("#readingHint");
   $("#unit").textContent = m && m.meter === "km" ? "km" : "h";
-  $("#readingLbl").textContent = m && m.meter === "km" ? "Odometer" : "Hour meter";
+  $("#readingLbl").textContent = m && m.trips ? "End hours" : m && m.meter === "km" ? "Odometer" : "Hour meter";
   h.className = "hint"; $("#confirmWrap").hidden = true;
   if(!m){ h.textContent = ""; return {ok:true}; }
   const last = m.last, v = parseFloat($("#reading").value), u = m.meter === "km" ? "km" : "h";
   if(!last){ h.textContent = "First log for this machine."; return {ok:true}; }
   const lastTxt = `Last reading ${last.reading} ${u}${last.date ? " on " + fmtD(last.date) : ""}${last.operator ? " by " + last.operator : ""}.`;
   if(isNaN(v)){ h.textContent = lastTxt; return {ok:true}; }
+  if(m.trips){
+    const sh = startNum("startH");
+    if(sh == null){ h.textContent = lastTxt; return {ok:false, msg:"Enter the start hours."}; }
+    if(sh < last.reading){ h.className = "hint bad"; h.textContent = `Start hours are lower than where the last trip ended (${last.reading} h).`; return {ok:false, msg:`Start hours are lower than where the last trip ended (${last.reading} h).`}; }
+    if(isNaN(v)){ h.textContent = `Last trip ended at ${last.reading} h.`; return {ok:true}; }
+    if(v < sh){ h.className = "hint bad"; h.textContent = "End hours are lower than start hours."; return {ok:false, msg:"End hours must be the same as or higher than start hours."}; }
+    h.textContent = `Trip time on the meter: ${Math.round((v - sh)*10)/10} h.`;
+    if(v - sh > 16){ h.className = "hint warn"; $("#confirmWrap").hidden = false; $("#confirmText").textContent = `${Math.round((v - sh)*10)/10} h for one trip is unusually high. Tick to confirm.`; return {ok: $("#confirm").checked, msg:"Confirm the high reading, or correct it."}; }
+    return {ok:true};
+  }
   if(v < last.reading){ h.className = "hint bad"; h.textContent = `Lower than the last reading (${last.reading} ${u}). Check the meter.`; return {ok:false, msg:`The reading is lower than the last one (${last.reading} ${u}). Check the meter.`}; }
   const days = last.date ? Math.max(1, dayNum($("#date").value || today()) - dayNum(last.date)) : 1;
   const diff = Math.round((v - last.reading)*10)/10;
@@ -164,7 +198,7 @@ function hint(){
 
 $("#fuel").addEventListener("click", e => { const b = e.target.closest("button"); if(!b) return; fuelPct = Number(b.dataset.v); $$("#fuel button").forEach(x => x.setAttribute("aria-pressed", x===b)); });
 $("#defect").addEventListener("click", e => { const b = e.target.closest("button"); if(!b) return; defect = b.dataset.v === "yes"; $$("#defect button").forEach(x => x.setAttribute("aria-pressed", x===b)); $("#defectWrap").hidden = !defect; });
-$("#machine").addEventListener("change", hint);
+$("#machine").addEventListener("change", () => { prefillTrip(); hint(); kmCheck(); });
 $("#reading").addEventListener("input", hint);
 $("#date").addEventListener("change", hint);
 
@@ -250,6 +284,7 @@ $("#f").addEventListener("submit", async e => {
     reading: parseFloat($("#reading").value), fuel_pct: fuelPct, fuel_added: parseFloat($("#fuelAdded").value) || 0,
     defect, defect_note: defect ? $("#defectNote").value.trim() : "",
     odometer_km: m.km ? parseFloat($("#km").value) : null,
+    start_hours: m.trips ? startNum("startH") : null, start_km: m.trips ? startNum("startKm") : null,
     trip_from: m.trips ? siteVal("tripFrom") : "", trip_to: m.trips ? siteVal("tripTo") : "", material: m.trips ? $("#material").value.trim() : "",
     photo: await resizePhoto($("#photo").files[0]), client_id: Date.now().toString(36) + Math.random().toString(36).slice(2,6)
   };
@@ -261,13 +296,13 @@ $("#f").addEventListener("submit", async e => {
     const res = await post(body);
     if(!res.ok){ btn.disabled = false; btn.textContent = m.trips ? "Submit trip" : "Submit log"; return fail(res.error || "The log was not saved."); }
     store.set("fl_pin", body.pin);
-    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; store.set("fl_config", cfg);
-    $("#doneText").innerHTML = m.trips ? `<b>Trip logged.</b> ${m.name}: ${body.trip_from} → ${body.trip_to}.` : `<b>Logged.</b> ${m.name} at ${body.reading} ${u}.`;
+    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; if(m.trips) m.lastTo = body.trip_to; store.set("fl_config", cfg);
+    $("#doneText").innerHTML = m.trips ? `<b>Trip logged.</b> ${m.name}: ${body.trip_from} → ${body.trip_to}${body.start_km != null && body.odometer_km != null ? `, ${Math.round(body.odometer_km - body.start_km)} km` : ""}.` : `<b>Logged.</b> ${m.name} at ${body.reading} ${u}.`;
   }catch(x){
     // No signal: keep it on the phone and send later (photo dropped to save space)
     const q = store.get("fl_outbox", []); q.push({...body, photo:null}); store.set("fl_outbox", q);
     store.set("fl_pin", body.pin);
-    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; store.set("fl_config", cfg);
+    m.last = { reading: body.reading, date: body.date, operator: body.operator }; if(m.km) m.lastKm = body.odometer_km; if(m.trips) m.lastTo = body.trip_to; store.set("fl_config", cfg);
     $("#doneText").innerHTML = `<b>Saved on this phone.</b> No signal right now. It will send automatically.`;
     showOutbox();
   }
@@ -282,7 +317,7 @@ $("#another").addEventListener("click", () => {
   const lastTo = siteVal("tripTo");
   render();
   ["site","tripFrom","tripTo"].forEach(id => { $("#" + id + "New").value = ""; $("#" + id + "New").hidden = true; if($("#" + id).value === "__new__") $("#" + id).value = ""; });
-  if(keep){ $("#tripFrom").value = lastTo; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
+  if(keep){ prefillTrip(); $("#tripFrom").value = lastTo; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
   fuelPct = null; defect = false; $$("#fuel button").forEach(b => b.setAttribute("aria-pressed","false"));
   $$("#defect button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === "no")); $("#defectWrap").hidden = true;
   $("#done").hidden = true; $("#f").hidden = false; hint();

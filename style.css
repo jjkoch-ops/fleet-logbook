@@ -167,3 +167,7 @@ a{color:inherit}
 .partrow{display:grid;grid-template-columns:1fr 90px auto;gap:8px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 .hist td:nth-child(-n+3){white-space:nowrap}
+
+.meters{display:grid;gap:16px 12px;align-items:start}
+.meters.trip{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.meters.trip .meter{font-size:19px}

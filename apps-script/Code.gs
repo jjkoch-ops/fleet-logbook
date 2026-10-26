@@ -21,7 +21,7 @@ const HEADERS = {
   Machines:  ['id', 'name', 'type', 'meter', 'baseline', 'km', 'km_baseline', 'trips'],
   Intervals: ['machine_id', 'service', 'every', 'last_done_at', 'last_done_date'],
   Lists:     ['Operators', 'Sites', 'Materials'],
-  Logs:      ['timestamp', 'date', 'machine_id', 'machine', 'operator', 'site', 'reading', 'fuel_pct', 'fuel_added_l', 'defect', 'defect_note', 'photo', 'odometer_km', 'trip_from', 'trip_to', 'material'],
+  Logs:      ['timestamp', 'date', 'machine_id', 'machine', 'operator', 'site', 'reading', 'fuel_pct', 'fuel_added_l', 'defect', 'defect_note', 'photo', 'odometer_km', 'trip_from', 'trip_to', 'material', 'start_hours', 'start_km'],
   Services:  ['timestamp', 'date', 'machine_id', 'machine', 'reading', 'services', 'parts', 'notes'],
   Parts:     ['id', 'name', 'part_no', 'used_on', 'qty', 'reorder_at', 'unit']
 };
@@ -158,7 +158,8 @@ function publicConfig() {
         km: isYes(m.km), trips: isYes(m.trips),
         last: last ? { reading: num(last.reading), date: last.date, operator: last.operator }
                    : (num(m.baseline) != null ? { reading: num(m.baseline), date: null, operator: null } : null),
-        lastKm: lastKm != null ? lastKm : num(m.km_baseline)
+        lastKm: lastKm != null ? lastKm : num(m.km_baseline),
+        lastTo: last && last.trip_to ? String(last.trip_to) : null
       };
     }),
     operators: lists.operators,
@@ -176,7 +177,7 @@ function allData() {
       ...i, every: num(i.every), last_done_at: i.last_done_at === '' ? null : num(i.last_done_at)
     })),
     logs: rows('Logs').filter(l => l.machine_id).map(l => ({
-      ...l, reading: num(l.reading), fuel_pct: num(l.fuel_pct), fuel_added_l: num(l.fuel_added_l) || 0, odometer_km: num(l.odometer_km),
+      ...l, reading: num(l.reading), fuel_pct: num(l.fuel_pct), fuel_added_l: num(l.fuel_added_l) || 0, odometer_km: num(l.odometer_km), start_hours: num(l.start_hours), start_km: num(l.start_km),
       defect: String(l.defect).toLowerCase() === 'yes'
     })),
     services: rows('Services').filter(s => s.machine_id).map(s => ({ ...s, reading: num(s.reading) })),
@@ -213,8 +214,22 @@ function saveLog(b) {
     if (lastKm != null && km < lastKm) throw new Error('Odometer is lower than the last one logged (' + lastKm + ' km). Check it.');
   }
   if (isYes(machine.trips)) {
-    if (!String(b.trip_from || '').trim()) throw new Error('Choose where the trip started (From).');
-    if (!String(b.trip_to || '').trim()) throw new Error('Choose where the trip ended (To).');
+    if (!String(b.trip_from || '').trim()) throw new Error('Choose the start location.');
+    if (!String(b.trip_to || '').trim()) throw new Error('Choose the stop location.');
+  }
+  let startH = null, startKm = null;
+  if (isYes(machine.trips) && b.start_hours !== '' && b.start_hours != null) {
+    startH = Number(b.start_hours);
+    if (!isFinite(startH)) throw new Error('Enter the start hours.');
+    if (startH > reading) throw new Error('End hours must be the same as or higher than start hours.');
+    if (last && startH < num(last.reading)) throw new Error('Start hours are lower than the last trip ended (' + last.reading + ' h). Check the meter.');
+  }
+  if (isYes(machine.trips) && km != null && b.start_km !== '' && b.start_km != null) {
+    startKm = Number(b.start_km);
+    if (!isFinite(startKm)) throw new Error('Enter the start km.');
+    if (startKm > km) throw new Error('End km must be the same as or higher than start km.');
+    const lk = lastKmLog(logs, machine.id);
+    if (lk != null && startKm < lk) throw new Error('Start km is lower than the last trip ended (' + lk + ' km). Check the odometer.');
   }
 
   // Duplicate guard: same machine, date and readings already logged (e.g. a resend)
@@ -238,7 +253,8 @@ function saveLog(b) {
     site: String(b.site || ''), reading: reading, fuel_pct: fuel, fuel_added_l: Number(b.fuel_added) || 0,
     defect: b.defect ? 'Yes' : 'No', defect_note: String(b.defect_note || '').slice(0, 1000), photo: photoUrl,
     odometer_km: km == null ? '' : km, trip_from: String(b.trip_from || '').slice(0, 120),
-    trip_to: String(b.trip_to || '').slice(0, 120), material: String(b.material || '').slice(0, 120)
+    trip_to: String(b.trip_to || '').slice(0, 120), material: String(b.material || '').slice(0, 120),
+    start_hours: startH == null ? '' : startH, start_km: startKm == null ? '' : startKm
   });
   return { ok: true };
 }
@@ -373,7 +389,9 @@ function lastKmLog(logs, id) {
 function appendByHeader(name, obj) {
   const sh = sheet(name);
   const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
-  HEADERS[name].forEach(h => { if (head.indexOf(h) === -1) throw new Error('Column "' + h + '" is missing on the ' + name + ' tab. Run upgrade() in Apps Script.'); });
+  HEADERS[name].forEach(h => {
+    if (head.indexOf(h) === -1) { sh.getRange(1, head.length + 1).setValue(h).setFontWeight('bold'); head.push(h); }
+  });
   sh.appendRow(head.map(h => (h in obj ? obj[h] : '')));
 }
 
