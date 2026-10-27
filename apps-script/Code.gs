@@ -159,7 +159,7 @@ function publicConfig() {
         last: last ? { reading: num(last.reading), date: last.date, operator: last.operator }
                    : (num(m.baseline) != null ? { reading: num(m.baseline), date: null, operator: null } : null),
         lastKm: lastKm != null ? lastKm : num(m.km_baseline),
-        lastTo: last && last.trip_to ? String(last.trip_to) : null
+        lastTo: lastTripTo(logs, m.id)
       };
     }),
     operators: lists.operators,
@@ -353,7 +353,7 @@ function listColumns() {
 
 function lastLog(logs, id) {
   let best = null;
-  logs.forEach(l => { if (l.machine_id === id && (!best || num(l.reading) >= num(best.reading))) best = l; });
+  logs.forEach(l => { if (l.machine_id === id && num(l.reading) != null && (!best || num(l.reading) >= num(best.reading))) best = l; });
   return best;
 }
 
@@ -384,6 +384,16 @@ function lastKmLog(logs, id) {
   let best = null;
   logs.forEach(l => { const k = num(l.odometer_km); if (l.machine_id === id && k != null && (best == null || k > best)) best = k; });
   return best;
+}
+
+function lastTripTo(logs, id) {
+  let best = null;
+  logs.forEach(l => {
+    if (l.machine_id !== id || !l.trip_to) return;
+    const k = num(l.odometer_km) != null ? num(l.odometer_km) : num(l.reading);
+    if (!best || String(l.date) > String(best.date) || (String(l.date) === String(best.date) && k >= best.k)) best = { date: l.date, k: k, to: String(l.trip_to) };
+  });
+  return best ? best.to : null;
 }
 
 function appendByHeader(name, obj) {

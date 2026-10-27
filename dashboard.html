@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css?v=8">
-<script src="config.js?v=9"></script>
+<script src="config.js?v=10"></script>
 </head>
 <body>
 <header class="tabs">
@@ -173,10 +173,12 @@ $("#key").addEventListener("keydown", e => { if(e.key === "Enter") $("#keyGo").c
 function prep(){
   D.machines.forEach(m => m.intervals = D.intervals.filter(i => i.machine_id === m.id));
 }
-const logsFor = id => D.logs.filter(l => l.machine_id === id).sort((a,b) => a.reading - b.reading || (a.date < b.date ? -1 : 1));
+// logsFor: entries with an hour reading (for hours/service maths); logsAll: every entry (trips with km only included)
+const logsFor = id => D.logs.filter(l => l.machine_id === id && l.reading != null).sort((a,b) => a.reading - b.reading || (a.date < b.date ? -1 : 1));
+const logsAll = id => D.logs.filter(l => l.machine_id === id).sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.odometer_km ?? a.reading ?? 0) - (b.odometer_km ?? b.reading ?? 0));
 
 function stats(m){
-  const L = logsFor(m.id), t = today();
+  const L = logsFor(m.id), A = logsAll(m.id), t = today();
   const last = L[L.length-1] || null;
   const cur = last ? last.reading : m.baseline;
   const recent = L.filter(l => daysBetween(l.date, t) <= 30);
@@ -190,7 +192,7 @@ function stats(m){
   }
   let curKm = null, kmAvg = null, burn100 = null, trips7 = null;
   if(m.km){
-    const K = L.filter(l => l.odometer_km != null).sort((a,b) => a.odometer_km - b.odometer_km);
+    const K = A.filter(l => l.odometer_km != null).sort((a,b) => a.odometer_km - b.odometer_km);
     curKm = K.length ? K[K.length-1].odometer_km : m.km_baseline;
     const rk = K.filter(l => daysBetween(l.date, t) <= 30);
     if(rk.length >= 2){
@@ -201,9 +203,9 @@ function stats(m){
       if(f > 0 && dist > 0) burn100 = f / dist * 100;
     }
   }
-  if(m.trips) trips7 = L.filter(l => daysBetween(l.date, t) <= 6).length;
-  const lastDate = L.reduce((d,l) => !d || l.date > d ? l.date : d, null);
-  const defects = L.filter(l => l.defect && daysBetween(l.date, t) <= 14);
+  if(m.trips) trips7 = A.filter(l => daysBetween(l.date, t) <= 6).length;
+  const lastDate = A.reduce((d,l) => !d || l.date > d ? l.date : d, null);
+  const defects = A.filter(l => l.defect && daysBetween(l.date, t) <= 14);
   const svc = m.intervals.map(iv => {
     const every = iv.every || 0;
     if(iv.last_done_at == null || !every || cur == null) return {...iv, state:"base"};
@@ -245,16 +247,19 @@ function dayLabel(s){
   return {wd, dm: `${d} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m-1]}`, wknd: wd === "Sat" || wd === "Sun"};
 }
 function dayUsage(m, d){
-  const L = logsFor(m.id);
-  const onDay = L.filter(l => l.date === d);
+  const L = logsFor(m.id), A = logsAll(m.id);
+  const onDay = A.filter(l => l.date === d);
   if(!onDay.length) return null;
-  const end = Math.max(...onDay.map(l => l.reading));
-  const before = L.filter(l => l.date < d);
-  const start = before.length ? Math.max(...before.map(l => l.reading)) : null;
+  const hDay = L.filter(l => l.date === d), before = L.filter(l => l.date < d);
+  const end = hDay.length ? Math.max(...hDay.map(l => l.reading)) : null;
+  const start = end == null ? null : before.length ? Math.max(...before.map(l => l.reading)) : null;
   let km = null;
   if(m.km){
-    const kd = onDay.map(l => l.odometer_km).filter(k => k != null), kb = before.map(l => l.odometer_km).filter(k => k != null);
-    if(kd.length && kb.length) km = Math.max(0, Math.max(...kd) - Math.max(...kb));
+    if(onDay.every(l => l.start_km != null && l.odometer_km != null)) km = onDay.reduce((s,l) => s + Math.max(0, l.odometer_km - l.start_km), 0);
+    else {
+      const kd = onDay.map(l => l.odometer_km).filter(k => k != null), kb = A.filter(l => l.date < d).map(l => l.odometer_km).filter(k => k != null);
+      if(kd.length && kb.length) km = Math.max(0, Math.max(...kd) - Math.max(...kb));
+    }
   }
   return {
     km, trips: onDay.length,
