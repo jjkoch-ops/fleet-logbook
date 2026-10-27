@@ -171,3 +171,14 @@ a{color:inherit}
 .meters{display:grid;gap:16px 12px;align-items:start}
 .meters.trip{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .meters.trip .meter{font-size:19px}
+
+/* fuel gauge on machine cards */
+.fuel{display:grid;gap:5px;padding:12px 14px;background:var(--sunk);border:1px solid var(--line);border-radius:8px}
+.fuel-top{display:flex;justify-content:space-between;align-items:baseline}
+.fuel-top b{font:600 15px var(--mono)}
+.fuel-top b.ok{color:var(--ok)} .fuel-top b.warn{color:var(--warn)} .fuel-top b.bad{color:var(--bad)}
+.fuel-bar{position:relative;height:12px;border-radius:6px;background:var(--line);overflow:hidden}
+.fuel-bar i{display:block;height:100%;background:var(--ok)}
+.fuel-bar i.warn{background:var(--warn)} .fuel-bar i.bad{background:var(--bad)}
+.fuel-bar s{position:absolute;top:0;bottom:0;width:1px;background:var(--surface);opacity:.8}
+.fuel-scale{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--faint)}
