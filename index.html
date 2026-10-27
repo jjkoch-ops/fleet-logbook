@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#e5a00d">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=8">
-<script src="config.js?v=9"></script>
+<link rel="stylesheet" href="style.css?v=10">
+<script src="config.js?v=10"></script>
 </head>
 <body>
 <header>
@@ -26,7 +26,7 @@
   </div>
 
   <form id="f" class="form" novalidate>
-    <p class="lead" style="margin:0" id="leadTxt">Fill this in at the end of each shift, one entry per machine. Trucks: one entry per trip, like the logbook.</p>
+    <p class="lead" style="margin:0" id="leadTxt">Fill this in at the end of each shift, one entry per machine. Trucks: one entry per trip. Start readings fill in from the last entry.</p>
     <div class="row2">
       <div class="field"><label for="date">Date</label><input id="date" type="date" required></div>
       <div class="field"><label for="machine">Machine</label><select id="machine" required></select></div>
@@ -108,6 +108,7 @@ function render(){
   fill("#tripFrom", siteOpts, "Choose start");
   fill("#tripTo", siteOpts, "Choose destination");
   $("#materials").innerHTML = (cfg.materials || []).map(x => `<option value="${String(x).replace(/"/g,"&quot;")}">`).join("");
+  if(machine() && !$("#startH").value) prefillTrip();
   const lastOp = store.get("fl_operator", ""); if(lastOp && !$("#operator").value && cfg.operators.includes(lastOp)) $("#operator").value = lastOp;
   hint();
 }
@@ -129,30 +130,32 @@ function modeFields(){
   $("#kmWrap").hidden = !(m && m.km);
   $("#tripWrap").hidden = !(m && m.trips);
   $("#siteWrap").hidden = !!(m && m.trips);
-  $("#startHWrap").hidden = $("#startKmWrap").hidden = !(m && m.trips);
-  $("#meters").classList.toggle("trip", !!(m && m.trips));
-  $("#kmLbl").textContent = m && m.trips ? "End km" : "Odometer";
+  $("#startHWrap").hidden = !m;
+  $("#startKmWrap").hidden = !(m && m.km);
+  $("#meters").classList.toggle("trip", !!m);
+  $("#kmLbl").textContent = "End km";
   $("#submit").textContent = m && m.trips ? "Submit trip" : "Submit log";
   const kh = $("#kmHint");
-  if(m && m.km && !m.trips) kh.textContent = m.lastKm != null ? `Last odometer ${m.lastKm} km.` : "First odometer reading for this machine.";
+
 }
-/* Trucks: start readings and start location carry over from the last trip */
+/* Start readings (and a truck's start location) carry over from the last entry */
 function prefillTrip(){
-  const m = machine(); if(!m || !m.trips) return;
-  $("#startH").value = m.last ? m.last.reading : "";
-  $("#startKm").value = m.lastKm != null ? m.lastKm : "";
-  if(m.lastTo && cfg.sites.includes(m.lastTo)) $("#tripFrom").value = m.lastTo;
+  const m = machine(); if(!m) return;
+  $("#startH").value = m.last && m.last.reading != null ? m.last.reading : "";
+  $("#startKm").value = m.km && m.lastKm != null ? m.lastKm : "";
+  if(m.trips && m.lastTo && cfg.sites.includes(m.lastTo)) $("#tripFrom").value = m.lastTo;
 }
 const startNum = id => { const v = parseFloat($("#" + id).value); return isNaN(v) ? null : v; };
 function kmCheck(){
   const m = machine(); if(!m || !m.km) return {ok:true};
   const v = parseFloat($("#km").value), kh = $("#kmHint"); kh.className = "hint";
-  if(isNaN(v)) return {ok:false, msg: m.trips ? "Enter the end km." : "Enter the odometer (km)."};
-  if(m.trips){
+  if(isNaN(v)) return {ok:false, msg: "Enter the end km."};
+  {
     const sk = startNum("startKm");
-    if(sk != null && m.lastKm != null && sk < m.lastKm) return {ok:false, msg:`Start km is lower than where the last trip ended (${m.lastKm} km).`};
+    if(sk == null) return {ok:false, msg:"Enter the start km."};
+    if(m.lastKm != null && sk < m.lastKm) return {ok:false, msg:`Start km is lower than the last entry ended (${m.lastKm} km).`};
     if(sk != null && v < sk){ kh.className = "hint bad"; kh.textContent = "End km is lower than start km."; return {ok:false, msg:"End km must be the same as or higher than start km."}; }
-    kh.textContent = sk != null ? `Trip distance: ${Math.round(v - sk)} km.` : "";
+    kh.textContent = `${m.trips ? "Trip distance" : "Distance"}: ${Math.round(v - sk)} km.`;
     return {ok:true};
   }
   if(m.lastKm != null && v < m.lastKm){ kh.className = "hint bad"; kh.textContent = `Lower than the last odometer (${m.lastKm} km). Check it.`; return {ok:false, msg:`The odometer is lower than the last one (${m.lastKm} km).`}; }
@@ -167,21 +170,21 @@ function hint(){
   modeFields();
   const m = machine(), h = $("#readingHint");
   $("#unit").textContent = m && m.meter === "km" ? "km" : "h";
-  $("#readingLbl").textContent = m && m.trips ? "End hours" : m && m.meter === "km" ? "Odometer" : "Hour meter";
+  $("#readingLbl").textContent = m ? "End hours" : "Hour meter";
   h.className = "hint"; $("#confirmWrap").hidden = true;
   if(!m){ h.textContent = ""; return {ok:true}; }
   const last = m.last, v = parseFloat($("#reading").value), u = m.meter === "km" ? "km" : "h";
   if(!last){ h.textContent = "First log for this machine."; return {ok:true}; }
   const lastTxt = `Last reading ${last.reading} ${u}${last.date ? " on " + fmtD(last.date) : ""}${last.operator ? " by " + last.operator : ""}.`;
   if(isNaN(v)){ h.textContent = lastTxt; return {ok:true}; }
-  if(m.trips){
-    const sh = startNum("startH");
+  {
+    const sh = startNum("startH"), what = m.trips ? "trip" : "shift";
     if(sh == null){ h.textContent = lastTxt; return {ok:false, msg:"Enter the start hours."}; }
-    if(sh < last.reading){ h.className = "hint bad"; h.textContent = `Start hours are lower than where the last trip ended (${last.reading} h).`; return {ok:false, msg:`Start hours are lower than where the last trip ended (${last.reading} h).`}; }
-    if(isNaN(v)){ h.textContent = `Last trip ended at ${last.reading} h.`; return {ok:true}; }
+    if(sh < last.reading){ h.className = "hint bad"; h.textContent = `Start hours are lower than the last entry ended (${last.reading} h).`; return {ok:false, msg:`Start hours are lower than the last entry ended (${last.reading} h).`}; }
     if(v < sh){ h.className = "hint bad"; h.textContent = "End hours are lower than start hours."; return {ok:false, msg:"End hours must be the same as or higher than start hours."}; }
-    h.textContent = `Trip time on the meter: ${Math.round((v - sh)*10)/10} h.`;
-    if(v - sh > 16){ h.className = "hint warn"; $("#confirmWrap").hidden = false; $("#confirmText").textContent = `${Math.round((v - sh)*10)/10} h for one trip is unusually high. Tick to confirm.`; return {ok: $("#confirm").checked, msg:"Confirm the high reading, or correct it."}; }
+    const d = Math.round((v - sh)*10)/10;
+    h.textContent = `${d} h this ${what}.${sh > last.reading ? ` Note: start is ${Math.round((sh - last.reading)*10)/10} h after the last entry ended (${last.reading} h).` : ""}`;
+    if(d > 16){ h.className = "hint warn"; $("#confirmWrap").hidden = false; $("#confirmText").textContent = `${d} h for one ${what} is unusually high. Tick to confirm.`; return {ok: $("#confirm").checked, msg:"Confirm the high reading, or correct it."}; }
     return {ok:true};
   }
   if(v < last.reading){ h.className = "hint bad"; h.textContent = `Lower than the last reading (${last.reading} ${u}). Check the meter.`; return {ok:false, msg:`The reading is lower than the last one (${last.reading} ${u}). Check the meter.`}; }
@@ -284,7 +287,7 @@ $("#f").addEventListener("submit", async e => {
     reading: parseFloat($("#reading").value), fuel_pct: fuelPct, fuel_added: parseFloat($("#fuelAdded").value) || 0,
     defect, defect_note: defect ? $("#defectNote").value.trim() : "",
     odometer_km: m.km ? parseFloat($("#km").value) : null,
-    start_hours: m.trips ? startNum("startH") : null, start_km: m.trips ? startNum("startKm") : null,
+    start_hours: startNum("startH"), start_km: m.km ? startNum("startKm") : null,
     trip_from: m.trips ? siteVal("tripFrom") : "", trip_to: m.trips ? siteVal("tripTo") : "", material: m.trips ? $("#material").value.trim() : "",
     photo: await resizePhoto($("#photo").files[0]), client_id: Date.now().toString(36) + Math.random().toString(36).slice(2,6)
   };
@@ -317,7 +320,7 @@ $("#another").addEventListener("click", () => {
   const lastTo = siteVal("tripTo");
   render();
   ["site","tripFrom","tripTo"].forEach(id => { $("#" + id + "New").value = ""; $("#" + id + "New").hidden = true; if($("#" + id).value === "__new__") $("#" + id).value = ""; });
-  if(keep){ prefillTrip(); $("#tripFrom").value = lastTo; $("#tripTo").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
+  if(keep){ prefillTrip(); $("#tripFrom").value = lastTo; $("#tripTo").value = ""; } else { $("#startH").value = ""; $("#startKm").value = ""; } $("#reading").value = ""; $("#fuelAdded").value = ""; $("#defectNote").value = ""; $("#photo").value = ""; $("#confirm").checked = false;
   fuelPct = null; defect = false; $$("#fuel button").forEach(b => b.setAttribute("aria-pressed","false"));
   $$("#defect button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === "no")); $("#defectWrap").hidden = true;
   $("#done").hidden = true; $("#f").hidden = false; hint();

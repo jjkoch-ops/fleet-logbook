@@ -218,18 +218,18 @@ function saveLog(b) {
     if (!String(b.trip_to || '').trim()) throw new Error('Choose the stop location.');
   }
   let startH = null, startKm = null;
-  if (isYes(machine.trips) && b.start_hours !== '' && b.start_hours != null) {
+  if (b.start_hours !== '' && b.start_hours != null) {
     startH = Number(b.start_hours);
     if (!isFinite(startH)) throw new Error('Enter the start hours.');
     if (startH > reading) throw new Error('End hours must be the same as or higher than start hours.');
-    if (last && startH < num(last.reading)) throw new Error('Start hours are lower than the last trip ended (' + last.reading + ' h). Check the meter.');
+    if (last && startH < num(last.reading)) throw new Error('Start hours are lower than the last entry ended (' + last.reading + ' h). Check the meter.');
   }
-  if (isYes(machine.trips) && km != null && b.start_km !== '' && b.start_km != null) {
+  if (km != null && b.start_km !== '' && b.start_km != null) {
     startKm = Number(b.start_km);
     if (!isFinite(startKm)) throw new Error('Enter the start km.');
     if (startKm > km) throw new Error('End km must be the same as or higher than start km.');
     const lk = lastKmLog(logs, machine.id);
-    if (lk != null && startKm < lk) throw new Error('Start km is lower than the last trip ended (' + lk + ' km). Check the odometer.');
+    if (lk != null && startKm < lk) throw new Error('Start km is lower than the last entry ended (' + lk + ' km). Check the odometer.');
   }
 
   // Duplicate guard: same machine, date and readings already logged (e.g. a resend)
