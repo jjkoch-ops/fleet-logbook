@@ -126,3 +126,13 @@ Machines tab columns:
 Lists tab column C (**Materials**) fills the Material suggestions on the form.
 
 After pasting a new version of `Code.gs`, run **upgrade** once. It adds the new columns and sets the Tata to `meter=h`, `km=yes`, `trips=yes`. Then set the Tata's service interval in **hours** on the Intervals tab.
+
+## Fuel burn and fuel left
+
+Add a `tank_l` column on the Machines tab (running **upgrade** adds it and fills CAT 426F = 160 L per the Cat 426F2 spec, Tata 2628 = 280 L). The dashboard then works out:
+
+- **Burn rate:** full tank to full tank where two full tanks are logged (most accurate), otherwise from tank levels: (level at start − level at end) × tank size + litres added in between, over hours (or km for trucks).
+- **Fuel left now:** last reported level, plus litres added since, minus burn × hours (km) worked since. Shown as "≈ 88 L", with hours (km) of work left.
+- A level that goes up with no litres logged is treated as an unlogged fill and the calculation restarts after it. Drivers should always enter litres when they refuel.
+
+Figures marked * use the old method (diesel added ÷ hours) because there isn't enough level data yet.

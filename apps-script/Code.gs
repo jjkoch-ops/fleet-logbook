@@ -18,7 +18,7 @@
  */
 
 const HEADERS = {
-  Machines:  ['id', 'name', 'type', 'meter', 'baseline', 'km', 'km_baseline', 'trips'],
+  Machines:  ['id', 'name', 'type', 'meter', 'baseline', 'km', 'km_baseline', 'trips', 'tank_l'],
   Intervals: ['machine_id', 'service', 'every', 'last_done_at', 'last_done_date'],
   Lists:     ['Operators', 'Sites', 'Materials'],
   Logs:      ['timestamp', 'date', 'machine_id', 'machine', 'operator', 'site', 'reading', 'fuel_pct', 'fuel_added_l', 'defect', 'defect_note', 'photo', 'odometer_km', 'trip_from', 'trip_to', 'material', 'start_hours', 'start_km'],
@@ -92,6 +92,8 @@ function upgrade() {
   const v = sh.getDataRange().getValues(), head = v[0].map(h => String(h).trim());
   const c = n => head.indexOf(n) + 1;
   for (let r = 1; r < v.length; r++) {
+    const tank = { 'cat-426f': 160, 'tata-2628': 280 }[v[r][0]];
+    if (tank && c('tank_l') && String(v[r][c('tank_l') - 1] || '') === '') sh.getRange(r + 1, c('tank_l')).setValue(tank);
     if (v[r][0] === 'tata-2628') {
       sh.getRange(r + 1, c('meter')).setValue('h');
       sh.getRange(r + 1, c('km')).setValue('yes');

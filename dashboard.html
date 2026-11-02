@@ -218,7 +218,66 @@ function stats(m){
   // latest reported fuel level (any entry, newest first)
   const fuelLog = A.filter(l => l.fuel_pct != null).sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : String(a.timestamp).localeCompare(String(b.timestamp))).pop() || null;
   const fuel7 = A.filter(l => daysBetween(l.date, t) <= 6).reduce((s,l) => s + (l.fuel_added_l||0), 0);
-  return {L, last, cur, avg, burn, lastDate, defects, svc, curKm, kmAvg, burn100, trips7, fuelLog, fuel7};
+  const fc = m.km ? fuelCalc(m, A.filter(l => l.odometer_km != null).sort((a,b) => a.odometer_km - b.odometer_km), "odometer_km") : fuelCalc(m, L, "reading");
+  return {L, last, cur, avg, burn, lastDate, defects, svc, curKm, kmAvg, burn100, trips7, fuelLog, fuel7, fc};
+}
+
+/* Fuel use from tank levels + litres added.
+   R: entries for one machine, ascending by the meter `key` (reading = hours, odometer_km = km).
+   Between two entries that both report a level:  used = (level_a − level_b) × tank + litres added after a up to and including b.
+   1) Full-to-full (most accurate): from an entry showing F to a later fill-up to F with litres logged.
+   2) Otherwise tank levels over the longest recent stretch with no unlogged fill (needs tank size).
+   A level that goes up with no litres logged (or stays at F while the machine works) is an unlogged fill: calculations restart after it. */
+function fuelCalc(m, R, key){
+  const tank = Number(m.tank_l) > 0 ? Number(m.tank_l) : null;
+  const perKm = key === "odometer_km", minSpan = perKm ? 100 : 8, gapSpan = perKm ? 30 : 2;
+  R = R.filter(l => l[key] != null);
+  if(R.length < 2) return {tank};
+  const add = (i, j) => R.slice(i + 1, j + 1).reduce((s,l) => s + (l.fuel_added_l || 0), 0);
+  const lv = R.map((l,i) => i).filter(i => R[i].fuel_pct != null);
+  const isGap = (i, j) => add(i, j) === 0 && R[j][key] - R[i][key] > gapSpan &&
+    (R[j].fuel_pct > R[i].fuel_pct || (R[j].fuel_pct === 100 && R[i].fuel_pct === 100));
+  const gapAfter = new Set();                       // level-index positions where a gap ends
+  for(let k = 1; k < lv.length; k++) if(isGap(lv[k-1], lv[k])) gapAfter.add(k);
+  const clean = (ka, kb) => { for(let k = ka + 1; k <= kb; k++) if(gapAfter.has(k)) return false; return true; };
+
+  // 1) full-to-full, latest three fills averaged (litres-weighted)
+  let fL = 0, fD = 0, n = 0, basis = null;
+  for(let kb = lv.length - 1; kb > 0 && n < 3; kb--){
+    const j = lv[kb];
+    if(R[j].fuel_pct !== 100 || !(R[j].fuel_added_l > 0)) continue;
+    let ka = kb - 1; while(ka >= 0 && R[lv[ka]].fuel_pct !== 100) ka--;
+    if(ka < 0) continue;
+    const i = lv[ka]; if(!clean(ka, kb) && !gapAfter.has(kb)) continue;
+    // a gap ending exactly at kb means "F → F with litres" is fine; gaps strictly inside break it
+    let inside = false; for(let k = ka + 1; k < kb; k++) if(gapAfter.has(k)) inside = true;
+    if(inside) continue;
+    const d = R[j][key] - R[i][key]; if(d <= 0) continue;
+    fL += add(i, j); fD += d; n++;
+    if(!basis) basis = `full to full, ${fmtD(R[i].date)} – ${fmtD(R[j].date)}`;
+    kb = ka + 1;
+  }
+  let rate = null, method = null;
+  if(n && fD > 0){ rate = fL / fD; method = n > 1 ? `full to full, last ${n} fills` : basis; }
+
+  // 2) tank levels over the latest clean stretch
+  if(rate == null && tank && lv.length >= 2){
+    let ks = lv.length - 1; while(ks > 0 && !gapAfter.has(ks)) ks--;
+    const i = lv[ks], j = lv[lv.length - 1], d = R[j][key] - R[i][key];
+    if(i !== j && d >= minSpan){
+      const used = (R[i].fuel_pct - R[j].fuel_pct) / 100 * tank + add(i, j);
+      if(used > 0){ rate = used / d; method = `tank levels, ${fmtD(R[i].date)} – ${fmtD(R[j].date)}`; }
+    }
+  }
+
+  // estimate of fuel in the tank now
+  let est = null;
+  if(tank && rate != null && lv.length){
+    const k = lv[lv.length - 1], last = R.length - 1;
+    const litres = Math.max(0, Math.min(tank, R[k].fuel_pct / 100 * tank + add(k, last) - rate * (R[last][key] - R[k][key])));
+    est = {litres, pct: litres / tank * 100, left: rate > 0 ? litres / rate : null, from: R[k]};
+  }
+  return {tank, rate: rate == null ? null : perKm ? rate * 100 : rate, unit: perKm ? "L/100 km" : "L/h", method, est, perKm};
 }
 
 function fill(sel, items, placeholder){
@@ -320,13 +379,18 @@ function renderFleet(){
     if(st.defects.length){ defects += st.defects.length; items.push(["bad","Defect",`${m.name}: ${st.defects.length} defect report${st.defects.length>1?"s":""} in 14 days. Latest: “${st.defects[st.defects.length-1].defect_note || "no description"}”`]); }
     if(st.lastDate && st.lastDate < t){ const d = daysBetween(st.lastDate, t); if(d > 1) items.push([d > 2 ? "warn" : "info", "No log", `${m.name}: last log ${d} days ago (${fmtD(st.lastDate)})`]); }
     if(!st.lastDate) items.push(["info","No log",`${m.name}: no logs yet`]);
+    const fc = st.fc || {};
+    const showPct = fc.est ? fc.est.pct : st.fuelLog ? st.fuelLog.fuel_pct : null;
+    if(fc.est && fc.est.pct <= 25 && !(st.fuelLog && st.fuelLog.fuel_pct <= 25)) items.push([fc.est.pct < 10 ? "bad" : "warn", "Low fuel", `${m.name}: about ${fmtN(fc.est.litres)} L left (estimated from use since ${fmtD(fc.est.from.date)})`]);
     if(st.fuelLog && st.fuelLog.fuel_pct <= 25) items.push([st.fuelLog.fuel_pct === 0 ? "bad" : "warn", "Low fuel", `${m.name}: fuel ${fuelTxt(st.fuelLog.fuel_pct)} at last report (${fmtD(st.fuelLog.date)}${st.fuelLog.operator ? ", " + st.fuelLog.operator : ""})`]);
-    const fp = st.fuelLog ? st.fuelLog.fuel_pct : null, fcls = fp == null ? "" : fp <= 25 ? "bad" : fp <= 50 ? "warn" : "ok";
+    const fp = showPct, fcls = fp == null ? "" : fp <= 25 ? "bad" : fp <= 50 ? "warn" : "ok";
+    const rateTxt = fc.rate == null ? "" : `${fmtN(fc.rate, 1)} ${fc.unit}`;
     const fuelHtml = `<div class="fuel">
-        <div class="fuel-top"><span class="lbl">Fuel</span><b class="${fcls}">${fp == null ? "Not reported" : fuelTxt(fp) + " tank"}</b></div>
+        <div class="fuel-top"><span class="lbl">Fuel</span><b class="${fcls}">${fc.est ? `≈ ${fmtN(fc.est.litres)} L` : fp == null ? "Not reported" : fuelTxt(fp) + " tank"}</b></div>
         <div class="fuel-bar" role="img" aria-label="Fuel ${fp == null ? "not reported" : fp + "%"}"><i class="${fcls}" style="width:${fp == null ? 0 : Math.max(3, fp)}%"></i><s style="left:25%"></s><s style="left:50%"></s><s style="left:75%"></s></div>
         <div class="fuel-scale"><span>E</span><span>¼</span><span>½</span><span>¾</span><span>F</span></div>
-        <div class="hint">${st.fuelLog ? `Reported ${fmtD(st.fuelLog.date)}${st.fuelLog.operator ? " by " + esc(st.fuelLog.operator) : ""}` : "No fuel level logged yet"}${st.fuel7 ? ` · ${fmtN(st.fuel7)} L added in 7 days` : ""}</div>
+        <div class="hint">${fc.est ? `Estimated from ${fuelTxt(fc.est.from.fuel_pct)} on ${fmtD(fc.est.from.date)} and use since${fc.est.left != null ? ` · about ${fmtN(fc.est.left, 0)} ${fc.perKm ? "km" : "h"} left` : ""}` : st.fuelLog ? `Reported ${fmtD(st.fuelLog.date)}${st.fuelLog.operator ? " by " + esc(st.fuelLog.operator) : ""}` : "No fuel level logged yet"}${fc.tank ? ` · ${fmtN(fc.tank)} L tank` : " · add tank_l on the Machines tab"}</div>
+        ${rateTxt ? `<div class="hint">Burn <b>${rateTxt}</b> (${esc(fc.method)})</div>` : ""}
       </div>`;
     const pill = !st.lastDate ? `<span class="pill info plain">No logs</span>` : st.lastDate === t ? `<span class="pill ok plain">Logged today</span>` : `<span class="pill ${daysBetween(st.lastDate,t)>2?"warn":"info"} plain">Last log ${fmtD(st.lastDate)}</span>`;
     const svcHtml = st.svc.length ? st.svc.map(s => {
@@ -342,11 +406,11 @@ function renderFleet(){
       ${m.km ? `<div class="kv kv4">
         <div><span>H / day</span><b>${st.avg == null ? "—" : fmtN(st.avg, 1) + " h"}</b></div>
         <div><span>Km / day</span><b>${st.kmAvg == null ? "—" : fmtN(st.kmAvg)}</b></div>
-        <div><span>L / 100 km</span><b>${st.burn100 == null ? "—" : fmtN(st.burn100, 1)}</b></div>
+        <div><span>L / 100 km</span><b>${fc.rate != null && fc.perKm ? fmtN(fc.rate, 1) : st.burn100 == null ? "—" : fmtN(st.burn100, 1) + "*"}</b></div>
         <div><span>${m.trips ? "Trips 7d" : "Diesel 7d"}</span><b>${m.trips ? st.trips7 : fmtN(st.fuel7) + " L"}</b></div>
       </div>` : `<div class="kv">
         <div><span>Avg / day</span><b>${st.avg == null ? "—" : fmtN(st.avg, u === "km" ? 0 : 1) + " " + u}</b></div>
-        <div><span>Fuel burn</span><b>${st.burn == null ? "—" : fmtN(st.burn, u === "km" ? 2 : 1) + " L/" + u}</b></div>
+        <div><span>Fuel burn</span><b>${fc.rate != null && !fc.perKm ? fmtN(fc.rate, 1) + " L/h" : st.burn == null ? "—" : fmtN(st.burn, 1) + " L/h*"}</b></div>
         <div><span>Diesel 7d</span><b>${fmtN(st.fuel7)} L</b></div>
       </div>`}</article>`;
   });
