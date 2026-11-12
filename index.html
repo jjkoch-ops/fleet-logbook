@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#e5a00d">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="style.css?v=10">
-<script src="config.js?v=10"></script>
+<link rel="stylesheet" href="style.css?v=11">
+<script src="config.js?v=11"></script>
 </head>
 <body>
 <header>
@@ -43,16 +43,16 @@
       <div class="field"><label for="material">Material / load</label><input id="material" list="materials" placeholder="e.g. G5, sand, rubble" autocomplete="off"><datalist id="materials"></datalist></div>
     </div>
     <div id="meters" class="meters">
-      <div class="field" id="startHWrap" hidden><label for="startH">Start hours</label><div class="meter-wrap"><input id="startH" class="meter" type="number" inputmode="decimal" step="0.1" min="0"><span class="unit">h</span></div></div>
+      <div class="field" id="startHWrap" hidden><label for="startH">Start hours</label><div class="meter-wrap"><input id="startH" class="meter" type="text" inputmode="decimal" autocomplete="off" step="0.1" min="0"><span class="unit">h</span></div></div>
     <div class="field">
       <label for="reading" id="readingLbl">Hour meter</label>
-      <div class="meter-wrap"><input id="reading" class="meter" type="number" inputmode="decimal" step="0.1" min="0" required><span class="unit" id="unit">h</span></div>
+      <div class="meter-wrap"><input id="reading" class="meter" type="text" inputmode="decimal" autocomplete="off" step="0.1" min="0" required><span class="unit" id="unit">h</span></div>
       <div class="hint" id="readingHint"></div>
     </div>
-      <div class="field" id="startKmWrap" hidden><label for="startKm">Start km</label><div class="meter-wrap"><input id="startKm" class="meter" type="number" inputmode="numeric" step="1" min="0"><span class="unit">km</span></div></div>
+      <div class="field" id="startKmWrap" hidden><label for="startKm">Start km</label><div class="meter-wrap"><input id="startKm" class="meter" type="text" inputmode="decimal" autocomplete="off" step="1" min="0"><span class="unit">km</span></div></div>
     <div class="field" id="kmWrap" hidden>
       <label for="km" id="kmLbl">Odometer</label>
-      <div class="meter-wrap"><input id="km" class="meter" type="number" inputmode="numeric" step="1" min="0"><span class="unit">km</span></div>
+      <div class="meter-wrap"><input id="km" class="meter" type="text" inputmode="decimal" autocomplete="off" step="1" min="0"><span class="unit">km</span></div>
       <div class="hint" id="kmHint"></div>
     </div>
     </div>
@@ -62,7 +62,7 @@
         <button type="button" data-v="0" aria-pressed="false">E</button><button type="button" data-v="25" aria-pressed="false">¼</button><button type="button" data-v="50" aria-pressed="false">½</button><button type="button" data-v="75" aria-pressed="false">¾</button><button type="button" data-v="100" aria-pressed="false">F</button>
       </div>
     </div>
-    <div class="field"><label for="fuelAdded">Diesel added (litres)</label><input id="fuelAdded" type="number" inputmode="decimal" min="0" step="1" placeholder="0"></div>
+    <div class="field"><label for="fuelAdded">Diesel added (litres)</label><input id="fuelAdded" type="text" inputmode="decimal" autocomplete="off" min="0" step="1" placeholder="0"></div>
     <div class="field">
       <span class="lbl" id="defLbl">Any defects or problems?</span>
       <div class="toggle" role="group" aria-labelledby="defLbl" id="defect">
@@ -83,6 +83,7 @@
 const API = window.FLEET_API_URL;
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
+const num = v => { const s = String(v ?? "").trim().replace(/\s/g, "").replace(",", "."); if(!/^-?\d*\.?\d+$|^-?\d+\.$/.test(s)) return NaN; return parseFloat(s); };
 const pad = n => String(n).padStart(2,"0");
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 const dayNum = s => { const [y,m,d] = s.split("-").map(Number); return Math.round(Date.UTC(y,m-1,d)/864e5); };
@@ -145,10 +146,10 @@ function prefillTrip(){
   $("#startKm").value = m.km && m.lastKm != null ? m.lastKm : "";
   if(m.trips && m.lastTo && cfg.sites.includes(m.lastTo)) $("#tripFrom").value = m.lastTo;
 }
-const startNum = id => { const v = parseFloat($("#" + id).value); return isNaN(v) ? null : v; };
+const startNum = id => { const v = num($("#" + id).value); return isNaN(v) ? null : v; };
 function kmCheck(){
   const m = machine(); if(!m || !m.km) return {ok:true};
-  const v = parseFloat($("#km").value), kh = $("#kmHint"); kh.className = "hint";
+  const v = num($("#km").value), kh = $("#kmHint"); kh.className = "hint";
   if(isNaN(v)) return {ok:false, msg: "Enter the end km."};
   {
     const sk = startNum("startKm");
@@ -173,7 +174,7 @@ function hint(){
   $("#readingLbl").textContent = m ? "End hours" : "Hour meter";
   h.className = "hint"; $("#confirmWrap").hidden = true;
   if(!m){ h.textContent = ""; return {ok:true}; }
-  const last = m.last, v = parseFloat($("#reading").value), u = m.meter === "km" ? "km" : "h";
+  const last = m.last, v = num($("#reading").value), u = m.meter === "km" ? "km" : "h";
   if(!last){ h.textContent = "First log for this machine."; return {ok:true}; }
   const lastTxt = `Last reading ${last.reading} ${u}${last.date ? " on " + fmtD(last.date) : ""}${last.operator ? " by " + last.operator : ""}.`;
   if(isNaN(v)){ h.textContent = lastTxt; return {ok:true}; }
@@ -270,7 +271,7 @@ $("#f").addEventListener("submit", async e => {
   if(!m) return fail("Choose the machine.");
   if(!$("#operator").value) return fail("Choose your name.");
   if(!$("#date").value) return fail("Enter the date.");
-  if(isNaN(parseFloat($("#reading").value))) return fail("Enter the meter reading.");
+  if(isNaN(num($("#reading").value))) return fail("Enter the meter reading.");
   if(fuelPct == null) return fail("Tap the fuel level.");
   if(defect && !$("#defectNote").value.trim()) return fail("Describe the defect.");
   if(m.trips && !siteVal("tripFrom")) return fail($("#tripFrom").value === "__new__" ? "Type the name of the new start site." : "Choose where the trip started.");
@@ -284,9 +285,9 @@ $("#f").addEventListener("submit", async e => {
   const body = {
     action:"log", pin: $("#pin").value.trim(), machine_id: m.id, machine_name: m.name,
     operator: $("#operator").value, site: m.trips ? "" : siteVal("site"), date: $("#date").value,
-    reading: parseFloat($("#reading").value), fuel_pct: fuelPct, fuel_added: parseFloat($("#fuelAdded").value) || 0,
+    reading: num($("#reading").value), fuel_pct: fuelPct, fuel_added: num($("#fuelAdded").value) || 0,
     defect, defect_note: defect ? $("#defectNote").value.trim() : "",
-    odometer_km: m.km ? parseFloat($("#km").value) : null,
+    odometer_km: m.km ? num($("#km").value) : null,
     start_hours: startNum("startH"), start_km: m.km ? startNum("startKm") : null,
     trip_from: m.trips ? siteVal("tripFrom") : "", trip_to: m.trips ? siteVal("tripTo") : "", material: m.trips ? $("#material").value.trim() : "",
     photo: await resizePhoto($("#photo").files[0]), client_id: Date.now().toString(36) + Math.random().toString(36).slice(2,6)

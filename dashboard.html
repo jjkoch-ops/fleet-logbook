@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css?v=9">
-<script src="config.js?v=10"></script>
+<script src="config.js?v=11"></script>
 </head>
 <body>
 <header class="tabs">
@@ -75,7 +75,7 @@
             <div class="field"><label for="svMachine">Machine</label><select id="svMachine"></select></div>
             <div class="field"><label for="svDate">Date</label><input id="svDate" type="date"></div>
           </div>
-          <div class="field"><label for="svReading" id="svReadingLbl">Reading at service</label><input id="svReading" class="meter" type="number" inputmode="decimal" step="0.1" min="0"></div>
+          <div class="field"><label for="svReading" id="svReadingLbl">Reading at service</label><input id="svReading" class="meter" type="text" inputmode="decimal" autocomplete="off" step="0.1" min="0"></div>
           <div class="field"><span class="lbl">Services done</span><div id="svIntervals" class="form" style="gap:8px"></div></div>
           <div class="field"><span class="lbl">Parts used</span><div id="svParts" style="display:grid;gap:8px"></div><div><button type="button" class="btn ghost small" id="svAddPart">Add part</button></div></div>
           <div class="field"><label for="svNotes">Notes / work done</label><textarea id="svNotes" placeholder="e.g. Engine oil and filter, fuel filters, greased all points"></textarea></div>
@@ -101,8 +101,8 @@
             <div class="field"><label for="stFor">Used on</label><select id="stFor"></select></div>
           </div>
           <div class="row2">
-            <div class="field"><label for="stQty">Quantity on hand</label><input id="stQty" type="number" inputmode="decimal" min="0" step="1"></div>
-            <div class="field"><label for="stMin">Reorder at</label><input id="stMin" type="number" inputmode="decimal" min="0" step="1"></div>
+            <div class="field"><label for="stQty">Quantity on hand</label><input id="stQty" type="text" inputmode="decimal" autocomplete="off" min="0" step="1"></div>
+            <div class="field"><label for="stMin">Reorder at</label><input id="stMin" type="text" inputmode="decimal" autocomplete="off" min="0" step="1"></div>
           </div>
           <div class="field"><label for="stUnit">Unit</label><input id="stUnit" placeholder="each, litres, kit…"></div>
           <div id="stErr" class="err" hidden></div>
@@ -120,6 +120,7 @@
 const API = window.FLEET_API_URL;
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
+const num = v => { const s = String(v ?? "").trim().replace(/\s/g, "").replace(",", "."); if(!/^-?\d*\.?\d+$|^-?\d+\.$/.test(s)) return NaN; return parseFloat(s); };
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pad = n => String(n).padStart(2,"0");
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
@@ -479,7 +480,7 @@ $("#svMachine").addEventListener("change", () => {
 });
 $("#svAddPart").addEventListener("click", () => {
   const row = document.createElement("div"); row.className = "partrow";
-  row.innerHTML = `<select aria-label="Part"></select><input type="number" inputmode="decimal" min="0" step="1" value="1" aria-label="Quantity"><button type="button" class="btn ghost small" aria-label="Remove">✕</button>`;
+  row.innerHTML = `<select aria-label="Part"></select><input type="text" inputmode="decimal" autocomplete="off" min="0" step="1" value="1" aria-label="Quantity"><button type="button" class="btn ghost small" aria-label="Remove">✕</button>`;
   fill(row.querySelector("select"), partOpts(), D.parts.length ? "Choose part" : "No parts in stock list");
   row.querySelector("button").addEventListener("click", () => row.remove());
   $("#svParts").appendChild(row);
@@ -489,11 +490,11 @@ $("#svForm").addEventListener("submit", async e => {
   const err = $("#svErr"); err.hidden = true; const fail = t => { err.textContent = t; err.hidden = false; };
   const m = D.machines.find(x => x.id === $("#svMachine").value);
   if(!m) return fail("Choose the machine.");
-  const date = $("#svDate").value, reading = parseFloat($("#svReading").value);
+  const date = $("#svDate").value, reading = num($("#svReading").value);
   if(!date) return fail("Enter the service date.");
   if(isNaN(reading)) return fail("Enter the meter reading at the service.");
   const services = $$("#svIntervals input:checked").map(i => i.value);
-  const parts = $$("#svParts .partrow").map(r => ({id: r.querySelector("select").value, qty: parseFloat(r.querySelector("input").value) || 0})).filter(p => p.id && p.qty > 0);
+  const parts = $$("#svParts .partrow").map(r => ({id: r.querySelector("select").value, qty: num(r.querySelector("input").value) || 0})).filter(p => p.id && p.qty > 0);
   if(!services.length && !$("#svNotes").value.trim()) return fail("Tick the services done or describe the work.");
   const btn = $("#svSubmit"); btn.disabled = true; btn.textContent = "Saving…";
   try{
@@ -533,7 +534,7 @@ async function savePart(extra){
   const err = $("#stErr"); err.hidden = true;
   try{
     const res = await post({action:"part", id: $("#stPick").value || null, name: $("#stName").value.trim(), part_no: $("#stNo").value.trim(), used_on: $("#stFor").value,
-      qty: parseFloat($("#stQty").value) || 0, reorder_at: parseFloat($("#stMin").value) || 0, unit: $("#stUnit").value.trim(), ...extra});
+      qty: num($("#stQty").value) || 0, reorder_at: num($("#stMin").value) || 0, unit: $("#stUnit").value.trim(), ...extra});
     if(!res.ok){ err.textContent = res.error; err.hidden = false; return; }
     $("#stDone").innerHTML = `<span><b>${extra.remove ? "Removed" : "Saved"}</b> ${esc($("#stName").value)}.</span>`; $("#stDone").hidden = false;
     setTimeout(() => $("#stDone").hidden = true, 5000);
@@ -544,7 +545,7 @@ async function savePart(extra){
 $("#stForm").addEventListener("submit", e => {
   e.preventDefault();
   if(!$("#stName").value.trim()){ $("#stErr").textContent = "Enter the part name."; $("#stErr").hidden = false; return; }
-  if(isNaN(parseFloat($("#stQty").value))){ $("#stErr").textContent = "Enter the quantity on hand."; $("#stErr").hidden = false; return; }
+  if(isNaN(num($("#stQty").value))){ $("#stErr").textContent = "Enter the quantity on hand."; $("#stErr").hidden = false; return; }
   savePart({});
 });
 $("#stDelete").addEventListener("click", () => $("#stConfirmDel").hidden = false);
